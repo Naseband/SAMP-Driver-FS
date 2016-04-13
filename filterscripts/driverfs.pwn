@@ -1,6 +1,6 @@
 /* -----------------------------------------------------------------------------
 
-Smooth NPC Drivers - Have some Singleplayer-like NPCs on your server! - by NaS & AIped (c) 2013-2016
+Smooth NPC Drivers - Have some Singleplayer-like NPCs on your server - by NaS & AIped (c) 2013-2016
 
 Version: 1.2.1
 
