@@ -28,7 +28,7 @@ Feel free to use and modify as you wish, but don't re-release this without our p
 Latest Changenotes:
 [v1.2.1]
 
-- Support for newest (1.0.4) FCNPC version
+- Support for newest (1.0.4) FCNPC version.
 
 [v1.2]
 
