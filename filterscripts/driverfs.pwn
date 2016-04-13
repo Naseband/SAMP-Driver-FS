@@ -75,13 +75,14 @@ Latest Changenotes:
 #define DRIVER_AMOUNT 			(300)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
 #define DRIVER_TAXIS 			(100)
 
-#define NODE_DIST       		(18.0) // No fixed node distances anymore, this is the maximum
-#define SIDE_DIST       		(2.0)
+#define MAX_NODE_DIST       	(18.0)
+#define MIN_NODE_DIST           (6.0)
+#define SIDE_DIST       		(2.075)
 
 #define MIN_SPEED       		(0.65)
 #define MAX_SPEED       		(1.85)
 
-#define MAX_PATH_LEN    		(1500)
+#define MAX_PATH_LEN    		(1650)
 
 #define TAXI_RANGE  			(40.0) // range to valid nodes (player)
 #define TAXI_COOLDOWN       	(60) // seconds
@@ -865,7 +866,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 {
     if(!Initialized) return 1;
     
-    if(InitialCalculations <= DRIVER_AMOUNT) InitialCalculations ++;
+    if(InitialCalculations < DRIVER_AMOUNT) InitialCalculations ++;
     
 	new t = GetTickCount();
 	
@@ -914,9 +915,9 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		        break;
 		    }
 		    
-		    new Float:ndis = NODE_DIST;
+		    new Float:ndis = MAX_NODE_DIST;
 
-			if(i >= 3 && arrayid-1 < amount_of_nodes + 3)
+			if(i >= 3 && arrayid < amount_of_nodes - 2)
 			{
 				new Float:a1 = Get2DAngleOf3Points(DriverPath[driverid][i-2][0], DriverPath[driverid][i-2][1], DriverPath[driverid][i-1][0], DriverPath[driverid][i-1][1], NodePosX[arrayid], NodePosY[arrayid]);
 				new Float:a2 = Get2DAngleOf3Points(DriverPath[driverid][i-3][0], DriverPath[driverid][i-3][1], DriverPath[driverid][i-2][0], DriverPath[driverid][i-2][1], DriverPath[driverid][i-1][0], DriverPath[driverid][i-1][1]);
@@ -926,27 +927,26 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 				if(a2 < 0.0000) a2 *= -1.0;
 				if(a3 < 0.0000) a3 *= -1.0;
 				
-				if(a1 > 17.0) a1 = 17.0;
-				if(a2 > 17.0) a2 = 17.0;
-				if(a3 > 17.0) a3 = 17.0;
+				#define SP_ANGLE 14.0
+				
+				if(a1 > SP_ANGLE) a1 = SP_ANGLE;
+				if(a2 > SP_ANGLE) a2 = SP_ANGLE;
+				if(a3 > SP_ANGLE) a3 = SP_ANGLE;
 
-				if(a2 > a1) a1 = a2;
-				if(a3 > a1) a1 = a3;
+				a1 = (a2 > a1 ? (a3 > a2 ? a3 : a2) : (a3 > a1 ? a3 : a1)); // Confusing but effective, sets a1 to the highest value of a1, a2 or a3
 
-				ndis -= ((a1/17.0) * (NODE_DIST*0.7));
+				ndis -= ((a1/SP_ANGLE) * (MAX_NODE_DIST*0.7));
 
 			    new Float: Zrel = (NodePosZ[arrayid] - DriverPath[driverid][i-1][2]) / dis;
 			    if(Zrel < 0.0) Zrel *= -3.0;
 			    else Zrel *= 3.0;
 			    if(Zrel > 0.9) Zrel = 0.9;
 
-			    ndis -= (Zrel * NODE_DIST * 0.7);
-
-			    if(ndis < NODE_DIST/4.0) ndis = NODE_DIST/4.0;
+			    ndis -= (Zrel * MAX_NODE_DIST * 0.7);
 		    }
-		    else ndis = NODE_DIST/4.0;
+		    else ndis = MAX_NODE_DIST/4.0;
 		    
-		    if(ndis < 5.0) ndis = 5.0;
+		    if(ndis < MIN_NODE_DIST) ndis = MIN_NODE_DIST;
 		    
 			if(dis > ndis)
 			{
@@ -971,7 +971,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 			}
 		}
 		
-		if(arrayid < amount_of_nodes - 1) print("[DRIVERS] Error: Could not finish path. Higher MAX_PATH_LEN or NODE_DIST");
+		if(arrayid < amount_of_nodes - 1) print("[DRIVERS] Error: Could not finish path. Higher MAX_PATH_LEN or MAX_NODE_DIST");
 		
 		for(new i = 1; i < DriverPathLen[driverid]; i ++)
 		{
@@ -983,7 +983,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		newpath[0][0] = DriverPath[driverid][0][0];
 		newpath[0][1] = DriverPath[driverid][0][1];
 		
-		newpath = smooth_path(newpath, DriverPathLen[driverid], 0.7, 0.3);
+		newpath = smooth_path(newpath, DriverPathLen[driverid], 0.55, 0.4);
 		
 		new Float:MapZd, Float:MapZu;
 		
@@ -1009,13 +1009,6 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 
 			DriverPath[driverid][i][0] = newpath[i][0];
 		    DriverPath[driverid][i][1] = newpath[i][1];
-		    
-		    if(driverid == 66)
-			{
-				new str[20];
-				format(str, sizeof(str), "Nr. %d/%d", i, DriverPathLen[driverid]);
-				CreateDynamic3DTextLabel(str, 0xFFFF00DD, newpath[i][0], newpath[i][1], DriverPath[driverid][i][2], 50.0);
-			}
 		}
 		
 		Drivers[driverid][nCurNode] = 1;
@@ -1029,10 +1022,10 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		else printf("[DRIVERS] (%d ms) - PathLen: %d", GetTickCount() - t, DriverPathLen[driverid]);
 		#endif
 		
-		if(InitialCalculations == DRIVER_AMOUNT) { printf("\n[DRIVERS] Initial calculations completed after %.02fs.", (GetTickCount() - InitialCalculationStart) / 1000.0); PrintDriverUpdate(); }
-
-		if(DriverPathLen[driverid] > MaxPathLen) MaxPathLen = DriverPathLen[driverid];
+		if(InitialCalculations == DRIVER_AMOUNT) { printf("\n[DRIVERS] Initial calculations completed after %.02fs.", (GetTickCount() - InitialCalculationStart) / 1000.0); PrintDriverUpdate(); InitialCalculations = DRIVER_AMOUNT+1; }
 		
+		if(DriverPathLen[driverid] > MaxPathLen) MaxPathLen = DriverPathLen[driverid];
+
 		if(avgcalcidx >= sizeof(avgcalctimes)) avgcalcidx = 0;
 		avgcalctimes[avgcalcidx] = GetTickCount() - t;
 		avgcalcidx ++;
@@ -1271,7 +1264,7 @@ Float:smooth_path(Float:path[][S_DIMENSIONS], len = sizeof path, Float:weight_da
 
 		for(new i = 1; i < len - 1; i ++) // all nodes except start & end
 		{
-			for(new j = 0; j < S_DIMENSIONS; j ++) // every dimension (x-y-z) or (x-y)
+			for(new j = 0; j < S_DIMENSIONS; j ++)
 			{
 			    new Float:aux = npath[i][j];
 
