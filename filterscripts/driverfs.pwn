@@ -1,6 +1,6 @@
 /* -----------------------------------------------------------------------------
 
-Smooth NPC Drivers - Have some Singleplayer-like NPCs on your server - by NaS & AIped (c) 2013-2016
+Smooth NPC Drivers - Have some Singleplayer-like NPCs on your server! - by NaS & AIped (c) 2013-2016
 
 Version: 1.2.1
 
@@ -17,7 +17,7 @@ Note: The steep-hills-glitch (vehicles snapping around while driving up/down) is
 
 	AIped - Initiator of the 2013 version, help, ideas, scripting, ...
 	Gamer_Z - RouteConnector Plugin, QuaternionStuff Plugin and great help with some math-problems
-	OrMisicL - FCNPC Plugin
+	OrMisicL & ZiGGi - FCNPC Plugin
 	Incognito - Streamer Plugin
 	Pottus and other developers of ColAndreas
 
@@ -283,7 +283,7 @@ Drivers_Init()
 
 	FCNPC_SetUpdateRate(GetServerVarAsInt("incar_rate")*2);
 
-	CA_Init();
+	//CA_Init();
 
 	for(new i = 0; i < sizeof(gDestinationList); i ++) format(dialogstr, sizeof(dialogstr), "%s{999999}%s\n", dialogstr, gDestinationList[i][destName]);
 
@@ -353,7 +353,7 @@ Drivers_Init()
 	{
 		if(i >= maxnpc - othernpcs)
 		{
-		    printf("[DRIVERS] Error: maxnpc exceeded, limit for this script: %d. Aborted!", maxnpc-othernpcs);
+		    printf("[DRIVERS] Error: maxnpc exceeded, current limit for this script: %d.", maxnpc-othernpcs);
 		    for(new j = i; j < DRIVER_AMOUNT; j ++) Drivers[j][nUsed] = false;
 
 			break;
@@ -404,6 +404,7 @@ Drivers_Init()
 		FCNPC_Spawn(Drivers[i][nNPCID], DriverSkins[random(sizeof(DriverSkins))], X, Y, Z + VehicleZOffsets[vModel - 400]);
 		FCNPC_PutInVehicle(Drivers[i][nNPCID], Drivers[i][nVehicle], 0);
 		FCNPC_SetPosition(Drivers[i][nNPCID], X, Y, Z + VehicleZOffsets[vModel - 400]);
+		FCNPC_SetInvulnerable(Drivers[i][nNPCID], true);
 
 		Drivers[i][nOnDuty] = false;
 		Drivers[i][nPlayer] = -1;
