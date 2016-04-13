@@ -28,7 +28,7 @@ Feel free to use and modify as you wish, but don't re-release this without our p
 Latest Changenotes:
 [v1.2.1]
 
-- Support for newest (1.0.4) FCNPC version.
+- Support for newest (1.0.4) FCNPC version
 
 [v1.2]
 
@@ -1202,7 +1202,7 @@ public FCNPC_OnReachDestination(npcid)
 		if(!blocked)
 		{
 			new Float:AimedSpeed;
-			if(cnode < DriverPathLen[driverid]-3)
+			if(cnode > 1 && cnode < DriverPathLen[driverid]-3)
 			{
 				new Float:Xdif = DriverPath[driverid][cnode][0] - X, Float:Ydif = DriverPath[driverid][cnode][1] - Y, Float:Zdif = DriverPath[driverid][cnode][2] - Z;
 
@@ -1214,16 +1214,13 @@ public FCNPC_OnReachDestination(npcid)
 				if(dif > 1.0) dif = 1.0;
 
 			  	AimedSpeed = MAX_SPEED - (1.7*dif*(MAX_SPEED-MIN_SPEED)); // base speed based on steepness
+			  	
+			  	new Float:Adif = Get2DAngleOf3Points(DriverPath[driverid][cnode-1][0], DriverPath[driverid][cnode-1][1], DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode+1][0], DriverPath[driverid][cnode+1][1]);
 
-			  	if(cnode > 1 && cnode < DriverPathLen[driverid]-2)
-			  	{
-			  	    new Float:A = Get2DAngleOf3Points(DriverPath[driverid][cnode-1][0], DriverPath[driverid][cnode-1][1], DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode+1][0], DriverPath[driverid][cnode+1][1]);
+		  	    if(Adif > 50.0) Adif = 50.0;
 
-			  	    if(A < 0.0) A *= -1.0;
-			  	    if(A > 50.0) A = 50.0;
+				AimedSpeed = AimedSpeed - ((AimedSpeed/80.0) * Adif);
 
-					AimedSpeed = AimedSpeed - ((AimedSpeed/80.0) * A);
-			  	}
 		  	}
 		  	else if(Drivers[driverid][nOnDuty] && Drivers[driverid][nType] == DRIVER_TYPE_TAXI) AimedSpeed = Drivers[driverid][nSpeed] * 0.7;
 		  	else AimedSpeed = (MIN_SPEED + MAX_SPEED) / 2.0;
@@ -1241,7 +1238,7 @@ public FCNPC_OnReachDestination(npcid)
 
 		FCNPC_GoTo(npcid, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], MOVE_TYPE_DRIVE, Drivers[driverid][nSpeed], false, 0.0, false);
         FCNPC_SetQuaternion(npcid, Qw, Qx, Qy, Qz);
-		
+
 		#if MAP_ZONES == true
 		Drivers[driverid][nGangZone] = GangZoneCreate(X-4.5, Y-4.5, X+4.5, Y+4.5);
 		GangZoneShowForAll(Drivers[driverid][nGangZone], 0x66FF00FF);
