@@ -1217,6 +1217,7 @@ public FCNPC_OnReachDestination(npcid)
 			  	
 			  	new Float:Adif = Get2DAngleOf3Points(DriverPath[driverid][cnode-1][0], DriverPath[driverid][cnode-1][1], DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode+1][0], DriverPath[driverid][cnode+1][1]);
 
+		  	    if(Adif < 0.0) Adif *= -1.0;
 		  	    if(Adif > 50.0) Adif = 50.0;
 
 				AimedSpeed = AimedSpeed - ((AimedSpeed/80.0) * Adif);
