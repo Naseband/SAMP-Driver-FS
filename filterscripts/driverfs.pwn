@@ -29,6 +29,10 @@ Latest Changenotes:
 [v1.2.1]
 
 - Support for newest (1.0.4) FCNPC version
+- Added Cops (count as civilains)
+   Cops turn on the sirens sometimes to annoy their surroundings
+- Added Skin Arrays for different types (Civ, Cops, Taxis)
+- There is a very rough time measurement now when you choose your destination
 
 [v1.2]
 
@@ -72,24 +76,24 @@ Latest Changenotes:
 #define INFO_DELAY              (300) // seconds
 #define MAP_ZONES               (false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT 			(300)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS 			(100)
+#define DRIVER_AMOUNT 			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_TAXIS 			(70)
 
-#define MAX_NODE_DIST       	(18.0)
+#define MAX_NODE_DIST       	(16.5)
 #define MIN_NODE_DIST           (6.0)
 #define SIDE_DIST       		(2.075)
 
 #define MIN_SPEED       		(0.65)
 #define MAX_SPEED       		(1.85)
 
-#define MAX_PATH_LEN    		(1650)
+#define MAX_PATH_LEN    		(1550)
 
-#define TAXI_RANGE  			(40.0) // range to valid nodes (player)
+#define TAXI_RANGE  			(35.0) // range to valid nodes (player)
 #define TAXI_COOLDOWN       	(60) // seconds
 #define TAXI_TIMEOUT        	(40) // seconds
 
-#define DRIVER_RANGE_ROT_ONLY   (270.0) // If no player is in this range, the npc will move very roughly, else do only rotations
-#define DRIVER_RANGE_SMOOTH     (130.0) // If any player is in this range, an npc will do smooth movement
+#define DRIVER_RANGE_ROT_ONLY   (300.0) // If no player is in this range, the npc will move very roughly, else do only rotations
+#define DRIVER_RANGE_SMOOTH     (160.0) // If any player is in this range, an npc will do smooth movement
 
 #define ROUTE_MIN_DIST   		(650.0) // Minimum distance for random routes
 
@@ -128,16 +132,19 @@ enum E_DRIVERS
 	bool:nUsed,
 	bool:nOnDuty,
 	bool:nActive, // Active means a player is close (-> does all calculations)
+	bool:nIsCop,
 	nNPCID,
 	nType,
 	nState,
 	nCurNode,
 	nLastDest,
+	Float:nDistance,
 	Float:nSpeed,
 	nVehicle,
 	nVehicleModel,
 	nPlayer,
 	nLT, // Last Tick
+	nCopStuffTick,
 	nCalcFails,
 	nStreamingAreaS,
 	nStreamingAreaL,
@@ -153,7 +160,7 @@ new Drivers[DRIVER_AMOUNT][E_DRIVERS];
 new Float:DriverPath[DRIVER_AMOUNT][MAX_PATH_LEN][3];
 new DriverPathLen[DRIVER_AMOUNT];
 
-new Float:VehicleZOffsets[] =
+new Float:VehicleZOffsets[] = // Contains normal 4wheel vehicles, including Quad, Police Cars and Police Rancher, no special vehicles
 {
 	1.0982/*(400)*/,0.7849/*(401)*/,0.8371/*(402)*/,-1000.0/*(403)*/,0.7416/*(404)*/,0.8802/*(405)*/,-1000.0/*(406)*/,-1000.0/*(407)*/,-1000.0/*(408)*/,0.7901/*(409)*/,
 	0.6667/*(410)*/,-1000.0/*(411)*/,0.8450/*(412)*/,-1000.0/*(413)*/,-1000.0/*(414)*/,0.7754/*(415)*/,-1000.0/*(416)*/,-1000.0/*(417)*/,-1000.0/*(418)*/,0.8033/*(419)*/,
@@ -162,7 +169,7 @@ new Float:VehicleZOffsets[] =
 	1.1232/*(440)*/,-1000.0/*(441)*/,0.8379/*(442)*/,-1000.0/*(443)*/,-1000.0/*(444)*/,0.8806/*(445)*/,-1000.0/*(446)*/,-1000.0/*(447)*/,-1000.0/*(448)*/,-1000.0/*(449)*/,
 	-1000.0/*(450)*/,-1000.0/*(451)*/,-1000.0/*(452)*/,-1000.0/*(453)*/,-1000.0/*(454)*/,-1000.0/*(455)*/,-1000.0/*(456)*/,-1000.0/*(457)*/,0.8842/*(458)*/,-1000.0/*(459)*/,
 	-1000.0/*(460)*/,-1000.0/*(461)*/,-1000.0/*(462)*/,-1000.0/*(463)*/,-1000.0/*(464)*/,-1000.0/*(465)*/,0.7490/*(466)*/,0.7465/*(467)*/,-1000.0/*(468)*/,-1000.0/*(469)*/,
-	-1000.0/*(470)*/,-1000.0/*(471)*/,-1000.0/*(472)*/,-1000.0/*(473)*/,0.7364/*(474)*/,0.8077/*(475)*/,-1000.0/*(476)*/,-1000.0/*(477)*/,1.0010/*(478)*/,0.7994/*(479)*/,
+	-1000.0/*(470)*/,0.3005/*(471)*/,-1000.0/*(472)*/,-1000.0/*(473)*/,0.7364/*(474)*/,0.8077/*(475)*/,-1000.0/*(476)*/,-1000.0/*(477)*/,1.0010/*(478)*/,0.7994/*(479)*/,
 	0.7799/*(480)*/,-1000.0/*(481)*/,1.1209/*(482)*/,-1000.0/*(483)*/,-1000.0/*(484)*/,-1000.0/*(485)*/,-1000.0/*(486)*/,-1000.0/*(487)*/,-1000.0/*(488)*/,1.1498/*(489)*/,
 	-1000.0/*(490)*/,0.7619/*(491)*/,0.7875/*(492)*/,-1000.0/*(493)*/,-1000.0/*(494)*/,1.3588/*(495)*/,0.7226/*(496)*/,-1000.0/*(497)*/,1.0726/*(498)*/,0.9988/*(499)*/,
 	1.1052/*(500)*/,-1000.0/*(501)*/,-1000.0/*(502)*/,-1000.0/*(503)*/,-1000.0/*(504)*/,1.1498/*(505)*/,0.7100/*(506)*/,0.8319/*(507)*/,1.3809/*(508)*/,-1000.0/*(509)*/,
@@ -179,22 +186,24 @@ new Float:VehicleZOffsets[] =
 	-1000.0/*(610)*/,-1000.0/*(611)*/
 };
 
-new DriverSkins[] = // This needs some work, cops skins etc need to be removed
+new DriverSkins[] = // Skin IDs for citizens, not sorted - no specific/story skins
 {
-	9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-	32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
-	56, 57, 58, 59, 60, 61, 62, 63, 64, 66, 67, 68, 69, 70, 71, 72, 73, 75, 76, 77, 78, 79, 80,
-	81, 82, 83, 84, 85, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
-	104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 120, 121, 122,
-	123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140,
-	141, 142, 143, 144, 145, 146, 147, 148, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
-	160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177,
-	178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195,
-	196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 209, 210, 211, 212, 213, 214,
-	215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232,
-	233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250,
-	251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 274, 275, 276, 277,
-	278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288
+	10, 101, 12, 13, 136, 14, 142, 143, 15, 151, 156, 168, 169,
+	17, 170, 180, 182, 183, 184, 263, 186, 185, 19, 216, 91, 206,
+	21, 22, 210, 214, 215, 220, 221, 225, 226, 222, 223, 227, 231,
+	228, 234, 76, 235, 236, 89, 88, 24, 218, 240, 25, 250, 261, 40,
+	41, 35, 37, 38, 44, 69, 43, 46, 9, 93, 39, 48, 47, 229, 58, 59,
+	60, 233, 72, 55, 94, 95, 98, 241, 242, 73, 83
+};
+
+new CopSkins[] = // Skin IDs for cops
+{
+	280, 281, 282, 283, 288, 306, 307, 310, 311
+};
+
+new TaxiSkins[] = // Skin IDs for taxi drivers - kind of randomly picked
+{
+	188, 20, 36, 262, 7, 56
 };
 
 new RandomNodes[MAX_RANDOM_NODES], RandomNodesNum = 0;
@@ -283,7 +292,7 @@ Drivers_Init()
 
 	FCNPC_SetUpdateRate(GetServerVarAsInt("incar_rate")*2);
 
-	//CA_Init();
+	//CA_Init(); // You should uncomment this if you don't initialize ColAndreas before this FS gets loaded!
 
 	for(new i = 0; i < sizeof(gDestinationList); i ++) format(dialogstr, sizeof(dialogstr), "%s{999999}%s\n", dialogstr, gDestinationList[i][destName]);
 
@@ -372,24 +381,43 @@ Drivers_Init()
 
 		if(mZ - Z < 2.0) Z = mZ;
 
-		new vModel, colors[2];
+		new vmodel, colors[2], skinid;
 
 		if(i < DRIVER_TAXIS)
 		{
 			Drivers[i][nType] = DRIVER_TYPE_TAXI;
-			vModel = (random(2) == 0 ? 420 : 438);
-
+			Drivers[i][nIsCop] = false;
+			
+			vmodel = (random(2) == 0 ? 420 : 438);
+			skinid = TaxiSkins[random(sizeof(TaxiSkins))];
 			colors = {-1, -1};
 		}
 		else
 		{
 			Drivers[i][nType] = DRIVER_TYPE_RANDOM;
-			vModel = RandomVehicleList[random(VehicleListNum)];
-
-			colors[0] = random(127), colors[1] = random(127);
+			
+			vmodel = RandomVehicleList[random(VehicleListNum)];
+			
+			switch(vmodel) // Decide whether that driver is a cop or not by vehicle model (makes them a bit rare on purpose)
+			{
+			    case 596, 597, 598, 599:
+			    {
+			        Drivers[i][nIsCop] = true;
+			        
+			        skinid = CopSkins[random(sizeof(CopSkins))];
+			        colors = {-1, -1};
+			    }
+			    default:
+			    {
+			        Drivers[i][nIsCop] = false;
+			        
+			        skinid = DriverSkins[random(sizeof(DriverSkins))];
+			        colors[0] = random(127), colors[1] = random(127);
+			    }
+			}
 		}
 
-		Drivers[i][nVehicle] = CreateVehicle(vModel, X, Y, Z + 100000.0, 0.0, colors[0], colors[1], 128); // Spawn somewhere where noone ever will get! This prevents FCNPC's spawn flickering (vehicles showing up at spawn coords between movements for < 1ms (annoying when driving into them just then!))
+		Drivers[i][nVehicle] = CreateVehicle(vmodel, X, Y, Z + 100000.0, 0.0, colors[0], colors[1], 128); // Spawn somewhere where noone ever will get! This prevents FCNPC's spawn flickering (vehicles showing up at spawn coords between movements for < 1ms (annoying when driving into them just then!))
 
 		format(npcname, MAX_PLAYER_NAME, NPC_NAMES, i);
 
@@ -401,16 +429,16 @@ Drivers_Init()
 			break;
 		}
 		
-		FCNPC_Spawn(Drivers[i][nNPCID], DriverSkins[random(sizeof(DriverSkins))], X, Y, Z + VehicleZOffsets[vModel - 400]);
+		FCNPC_Spawn(Drivers[i][nNPCID], skinid, X, Y, Z + VehicleZOffsets[vmodel - 400]);
 		FCNPC_PutInVehicle(Drivers[i][nNPCID], Drivers[i][nVehicle], 0);
-		FCNPC_SetPosition(Drivers[i][nNPCID], X, Y, Z + VehicleZOffsets[vModel - 400]);
+		FCNPC_SetPosition(Drivers[i][nNPCID], X, Y, Z + VehicleZOffsets[vmodel - 400]);
 		FCNPC_SetInvulnerable(Drivers[i][nNPCID], true);
 
 		Drivers[i][nOnDuty] = false;
 		Drivers[i][nPlayer] = -1;
 		Drivers[i][nCurNode] = 0;
 		Drivers[i][nState] = DRIVER_STATE_NONE;
-		Drivers[i][nVehicleModel] = vModel;
+		Drivers[i][nVehicleModel] = vmodel;
 		Drivers[i][nUsed] = true;
 		Drivers[i][nLT] = GetTickCount();
 		#if MAP_ZONES == true
@@ -478,46 +506,47 @@ public Drivers_Exit(force)
 
 public OnPlayerConnect(playerid)
 {
-	LastTaxiInteraction[playerid] = GetTickCount() - TAXI_COOLDOWN*1000;
+	if(!IsPlayerNPC(playerid)) LastTaxiInteraction[playerid] = GetTickCount() - TAXI_COOLDOWN*1000;
 }
 
 public OnPlayerCommandText(playerid, cmdtext[])
 {
 	if(!Initialized) return 0;
-	
-	new cmd[128], idx;
-	cmd = strtok(cmdtext, idx);
-	
-	if(strcmp(cmd, "/DriverFSExit", true) == 0) // Exits the script, should be used instead of unloadfs (unloadfs crashes the server) - unloads the FS after 5 seconds
-	{
-		if(!IsPlayerAdmin(playerid)) return 1;
-		
-		Initialized = false;
-		SetTimerEx("Drivers_Exit", 5000, 0, "d", 1);
-	    return 1;
-	}
-	
-	if(strcmp(cmd, "/ds", true) == 0) // /ds [id] [seat] to sit into a driver car
-	{
-	    cmd = strtok(cmdtext, idx);
-	    new slot;
-	    if(strlen(cmd) < 1 || strval(cmd) < 0 || strval(cmd) >= DRIVER_AMOUNT) slot = 0;
-		else slot = strval(cmd);
 
-		new seat;
-
+	if(IsPlayerAdmin(playerid))
+	{
+	    new cmd[128], idx;
 		cmd = strtok(cmdtext, idx);
-		if(strval(cmd) == 0) seat = 1;
-		else seat = strval(cmd);
-		
-	    PutPlayerInVehicle(playerid, Drivers[slot][nVehicle], seat < 0 ? 1 : seat);
-		return 1;
-	}
 	
-	if(strcmp(cmdtext, "/dinfo", true) == 0)
-	{
-	    PrintDriverUpdate();
-	    return 1;
+		if(strcmp(cmd, "/DriverFSExit", true) == 0) // Exits the script, should be used instead of unloadfs (unloadfs crashes the server) - unloads the FS after 5 seconds
+		{
+			Initialized = false;
+			SetTimerEx("Drivers_Exit", 5000, 0, "d", 1);
+		    return 1;
+		}
+
+		if(strcmp(cmd, "/ds", true) == 0) // /ds [id] [seat] to sit into a driver car
+		{
+		    cmd = strtok(cmdtext, idx);
+		    new slot;
+		    if(strlen(cmd) < 1 || strval(cmd) < 0 || strval(cmd) >= DRIVER_AMOUNT) slot = 0;
+			else slot = strval(cmd);
+
+			new seat;
+
+			cmd = strtok(cmdtext, idx);
+			if(strval(cmd) == 0) seat = 1;
+			else seat = strval(cmd);
+
+		    PutPlayerInVehicle(playerid, Drivers[slot][nVehicle], seat < 0 ? 1 : seat);
+			return 1;
+		}
+
+		if(strcmp(cmdtext, "/dinfo", true) == 0)
+		{
+		    PrintDriverUpdate();
+		    return 1;
+		}
 	}
 	
 	if(strcmp(cmdtext, "/taxi", true) == 0)
@@ -727,6 +756,7 @@ public pubCalculatePath(driverid, startnode, endnode)
     CalculatePath(startnode, endnode, DRIVERS_ROUTE_ID + driverid, false, _, true);
     
     Drivers[driverid][nLastDest] = endnode;
+    
 	return 1;
 }
 
@@ -799,7 +829,7 @@ public RescueTimer()
     avgticks[avgtickidx] = GetServerTickRate();
     avgtickidx ++;
     
-	for(new i = 0; i < 50; i ++)
+	for(new i = 0; i < 30; i ++)
 	{
 	    if(Drivers[rescueid][nUsed])
 	    {
@@ -930,11 +960,8 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 				
 				#define SP_ANGLE 14.0
 				
-				if(a1 > SP_ANGLE) a1 = SP_ANGLE;
-				if(a2 > SP_ANGLE) a2 = SP_ANGLE;
-				if(a3 > SP_ANGLE) a3 = SP_ANGLE;
-
 				a1 = (a2 > a1 ? (a3 > a2 ? a3 : a2) : (a3 > a1 ? a3 : a1)); // Confusing but effective, sets a1 to the highest value of a1, a2 or a3
+                if(a1 > SP_ANGLE) a1 = SP_ANGLE;
 
 				ndis -= ((a1/SP_ANGLE) * (MAX_NODE_DIST*0.7));
 
@@ -944,6 +971,8 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 			    if(Zrel > 0.9) Zrel = 0.9;
 
 			    ndis -= (Zrel * MAX_NODE_DIST * 0.7);
+			    
+			    #undef SP_ANGLE
 		    }
 		    else ndis = MAX_NODE_DIST/4.0;
 		    
@@ -972,7 +1001,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 			}
 		}
 		
-		if(arrayid < amount_of_nodes - 1) print("[DRIVERS] Error: Could not finish path. Higher MAX_PATH_LEN or MAX_NODE_DIST");
+		if(arrayid < amount_of_nodes - 1) print("[DRIVERS] Error: Could not finish path. Higher MAX_PATH_LEN or MAX_NODE_DIST!");
 		
 		for(new i = 1; i < DriverPathLen[driverid]; i ++)
 		{
@@ -984,7 +1013,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		newpath[0][0] = DriverPath[driverid][0][0];
 		newpath[0][1] = DriverPath[driverid][0][1];
 		
-		newpath = smooth_path(newpath, DriverPathLen[driverid], 0.55, 0.4);
+		newpath = smooth_path(newpath, DriverPathLen[driverid], 0.75, 0.25);
 		
 		new Float:MapZd, Float:MapZu;
 		
@@ -1015,8 +1044,25 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		Drivers[driverid][nCurNode] = 1;
 		Drivers[driverid][nState] = DRIVER_STATE_DRIVE;
 		Drivers[driverid][nSpeed] = (MIN_SPEED + MAX_SPEED) / 3.0;
+		Drivers[driverid][nDistance] = distance;
 
 		SetTimerEx("FCNPC_OnReachDestination", 50, 0, "d", Drivers[driverid][nNPCID]);
+
+	  	if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty] && IsPlayerConnected(Drivers[driverid][nPlayer]))
+	  	{
+	  	    if(TaxiState[Drivers[driverid][nPlayer]] == TAXI_STATE_DRIVE2)
+	  	    {
+		  	    new roughmins = floatround((distance / (8.3 * MAX_SPEED)) / 60.0);
+		  	    
+		  	    if(roughmins <= 1) SendClientMessage(Drivers[driverid][nPlayer], -1, "[Taxi Driver]: {009900}I don't like these short ways...");
+		  	    else
+				{
+				    new str[115];
+					format(str, sizeof(str), "[Taxi Driver]: {009900}Most say this takes more than %d minutes. But I'll get you there in about %d minutes!", roughmins + 2 + random(4), roughmins);
+					SendClientMessage(Drivers[driverid][nPlayer], -1, str);
+				}
+			}
+	  	}
 		
 		#if DEBUG_PRINTS == true
 		if(InitialCalculations <= DRIVER_AMOUNT) printf("[DRIVERS] (%d ms) - PathLen: %d - Nr %d/%d", GetTickCount() - t, DriverPathLen[driverid], InitialCalculations, DRIVER_AMOUNT);
@@ -1062,6 +1108,16 @@ public FCNPC_OnReachDestination(npcid)
 		
 		Drivers[driverid][nCurNode] ++;
 		
+		if(Drivers[driverid][nIsCop] && random(100) <= 2)
+		{
+		    if(Drivers[driverid][nLT] - Drivers[driverid][nCopStuffTick] > 9000 && FCNPC_IsVehicleSiren(npcid)) FCNPC_SetVehicleSiren(npcid, false);
+		    else if(Drivers[driverid][nLT] - Drivers[driverid][nCopStuffTick] > 90000 && !FCNPC_IsVehicleSiren(npcid))
+		    {
+		        Drivers[driverid][nCopStuffTick] = Drivers[driverid][nLT];
+		        FCNPC_SetVehicleSiren(npcid, true);
+		    }
+		}
+		
 		if(Drivers[driverid][nCurNode] == DriverPathLen[driverid]) // Final Destination! >:D
 		{
 		    if(Drivers[driverid][nType] == DRIVER_TYPE_RANDOM || (Drivers[driverid][nType] == DRIVER_TYPE_TAXI && !Drivers[driverid][nOnDuty]))
@@ -1077,9 +1133,9 @@ public FCNPC_OnReachDestination(npcid)
 		        do
 		        {
 					endnode = GetRandomNode();
-		        } while(GetDistanceBetweenNodes(startnode, endnode) < ROUTE_MIN_DIST/* || GetDistanceBetweenNodes(startnode, endnode) > 1200.0*/);
+		        } while(GetDistanceBetweenNodes(startnode, endnode) < ROUTE_MIN_DIST);
 		        
-		        SetTimerEx("pubCalculatePath", 1000, 0, "ddd", driverid, startnode, endnode);
+		        SetTimerEx("pubCalculatePath", 300, 0, "ddd", driverid, startnode, endnode);
 		    }
 		    
 		    if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty])
@@ -1099,7 +1155,7 @@ public FCNPC_OnReachDestination(npcid)
 					SetTimerEx("pub_RemovePlayerFromVehicle", 1000, 0, "d", playerid);
 		            SetTimerEx("ResetTaxi", 10000, 0, "dd", driverid, 0);
 
-			        SendClientMessage(playerid, -1, "[Taxi Service]: {009900}We hope you enjoyed the ride!");
+			        SendClientMessage(playerid, -1, "[Taxi Driver]: {009900}Hope you enjoyed the ride!");
 		        }
 		    }
 		    
@@ -1226,7 +1282,9 @@ public FCNPC_OnReachDestination(npcid)
 		
 	  	if(Drivers[driverid][nSpeed] > MAX_SPEED) Drivers[driverid][nSpeed] = MAX_SPEED;
 	  	if(Drivers[driverid][nSpeed] < MIN_SPEED) Drivers[driverid][nSpeed] = MIN_SPEED;
-
+	  	
+	  	if(!blocked && FCNPC_IsVehicleSiren(npcid)) Drivers[driverid][nSpeed] += 0.35;
+	  	
         new Float:Qw, Float:Qx, Float:Qy, Float:Qz;
 		FCNPC_GetPosition(npcid, X, Y, Z);
 		GetQuatRotForVehBetweenCoords2D(X, Y, Z, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], Qw, Qx, Qy, Qz);
@@ -1259,7 +1317,7 @@ Float:smooth_path(Float:path[][S_DIMENSIONS], len = sizeof path, Float:weight_da
 
 	for(new i = 0; i < len; i ++) for(new j = 0; j < S_DIMENSIONS; j ++) npath[i][j] = path[i][j];
 
-	while(change >= 0.0001)
+	while(change >= 0.0007)
 	{
 	    change = 0.0;
 
