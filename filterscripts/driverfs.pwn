@@ -56,9 +56,10 @@ Latest Changenotes:
 
 // -----------------------------------------------------------------------------
 
+
 #include <a_samp>
 #undef MAX_PLAYERS
-#define MAX_PLAYERS     	(1000)
+#define MAX_PLAYERS				(1000)
 #include <FCNPC>
 #undef MAX_NODES
 #include <RouteConnector>
@@ -68,62 +69,62 @@ Latest Changenotes:
 
 // ----------------------------------------------------------------------------- CONFIG
 
-#define NPC_NAMES           	"DRIVER%003d" // %d will be replaced by the Drivers's ID (not NPC ID!)
+#define NPC_NAMES           		"DRIVER%003d" // %d will be replaced by the Drivers's ID (not NPC ID!)
 
-#define DEBUG_BUBBLE        	(false) // Lets NPCs show info via chat bubbles
-#define DEBUG_PRINTS        	(false) // Prints calculation times and warnings
-#define INFO_PRINTS             (true) // Prints Driver Info every X seconds
-#define INFO_DELAY              (300) // seconds
-#define MAP_ZONES               (false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
+#define DEBUG_BUBBLE			(false) // Lets NPCs show info via chat bubbles
+#define DEBUG_PRINTS			(false) // Prints calculation times and warnings
+#define INFO_PRINTS				(true) // Prints Driver Info every X seconds
+#define INFO_DELAY				(300) // seconds
+#define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT 		(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS 		(70)
+#define DRIVER_AMOUNT			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_TAXIS			(70)
 
-#define MAX_NODE_DIST       	(16.5)
-#define MIN_NODE_DIST           (6.0)
-#define SIDE_DIST       	(2.075)
+#define MAX_NODE_DIST			(16.5)
+#define MIN_NODE_DIST			(6.0)
+#define SIDE_DIST				(2.075)
 
-#define MIN_SPEED       	(0.65)
-#define MAX_SPEED       	(1.85)
+#define MIN_SPEED				(0.65)
+#define MAX_SPEED				(1.85)
 
-#define MAX_PATH_LEN    	(1550)
+#define MAX_PATH_LEN    		(1550)
 
-#define TAXI_RANGE  		(35.0) // range to valid nodes (player)
-#define TAXI_COOLDOWN       	(60) // seconds
-#define TAXI_TIMEOUT        	(40) // seconds
+#define TAXI_RANGE				(35.0) // range to valid nodes (player)
+#define TAXI_COOLDOWN			(60) // seconds
+#define TAXI_TIMEOUT			(40) // seconds
 
-#define DRIVER_RANGE_ROT_ONLY   (300.0) // If no player is in this range, the npc will move very roughly, else do only rotations
-#define DRIVER_RANGE_SMOOTH     (160.0) // If any player is in this range, an npc will do smooth movement
+#define DRIVER_RANGE_ROT_ONLY	(300.0) // If no player is in this range, the npc will move very roughly, else do only rotations
+#define DRIVER_RANGE_SMOOTH		(160.0) // If any player is in this range, an npc will do smooth movement
 
-#define ROUTE_MIN_DIST   	(650.0) // Minimum distance for random routes
+#define ROUTE_MIN_DIST			(650.0) // Minimum distance for random routes
 
-#define DRIVERS_ROUTE_ID    	(10000) // Starting routeid for path calculations - change if conflicts arise
-#define DIALOG_ID               (10000) // Starting dialogid for dialogs - change if conflicts arise
+#define DRIVERS_ROUTE_ID		(10000) // Starting routeid for path calculations - change if conflicts arise
+#define DIALOG_ID				(10000) // Starting dialogid for dialogs - change if conflicts arise
 
 // ----------------------------------------------------------------------------- INTERNAL CONFIG/DEFINES
 
-#define DRIVER_TYPE_RANDOM  	(0)
-#define DRIVER_TYPE_TAXI    	(1)
+#define DRIVER_TYPE_RANDOM		(0)
+#define DRIVER_TYPE_TAXI		(1)
 
-#define DRIVER_STATE_NONE   	(0)
-#define DRIVER_STATE_DRIVE  	(1)
-#define DRIVER_STATE_PAUSE  	(2)
+#define DRIVER_STATE_NONE		(0)
+#define DRIVER_STATE_DRIVE		(1)
+#define DRIVER_STATE_PAUSE		(2)
 
-#define MAX_SMOOTH_PATH     	(MAX_PATH_LEN + 1)
-#define S_DIMENSIONS        	(2)  // We only smooth x/y here
+#define MAX_SMOOTH_PATH			(MAX_PATH_LEN + 1)
+#define S_DIMENSIONS			(2)  // We only smooth x/y here
 
-#define MAX_RANDOM_NODES    	(3650)
+#define MAX_RANDOM_NODES		(3650)
 
-#define TAXI_STATE_NONE     	(0)
-#define TAXI_STATE_DRIVE1   	(1)
-#define TAXI_STATE_WAIT1    	(2)
-#define TAXI_STATE_DRIVE2   	(3)
+#define TAXI_STATE_NONE			(0)
+#define TAXI_STATE_DRIVE1		(1)
+#define TAXI_STATE_WAIT1		(2)
+#define TAXI_STATE_DRIVE2		(3)
 
-#define ZONES_NUM 		(60) // This is just for determining npc distances to each other via integers, lower value means bigger zones
+#define ZONES_NUM				(60) // This is just for determining npc distances to each other via integers, lower value means bigger zones
 
-#define DID_TAXI            	(DIALOG_ID + 0)
+#define DID_TAXI				(DIALOG_ID + 0)
 
-#pragma dynamic 		(64*1000) // Needs to be higher for longer paths/more npcs!
+#pragma dynamic					(64*1000) // Needs to be higher for longer paths/more npcs!
 
 // -----------------------------------------------------------------------------
 
@@ -1079,7 +1080,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		
 		return 1;
 	}
-    //return WhenRouteIsCalculated(routeid,node_id_array,amount_of_nodes,distance,Polygon,Polygon_Size,NodePosX,NodePosY,NodePosZ);
+    
     return 1;
 }
 
@@ -1397,4 +1398,3 @@ Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist)
 }
 
 // --- EOF ---
- 
