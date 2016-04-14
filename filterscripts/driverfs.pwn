@@ -1397,3 +1397,4 @@ Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist)
 }
 
 // --- EOF ---
+ 
