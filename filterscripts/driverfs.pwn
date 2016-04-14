@@ -72,6 +72,7 @@ Latest Changenotes:
 
 #define NPC_NAMES           	"DRIVER%003d" // %d will be replaced by the Drivers's ID (not NPC ID!)
 
+#define DEBUG_BUBBLE			(false) // Lets NPCs show info via chat bubbles
 #define DEBUG_PRINTS			(false) // Prints calculation times and warnings
 #define INFO_PRINTS				(true) // Prints Driver Info every X seconds
 #define INFO_DELAY				(300) // seconds
