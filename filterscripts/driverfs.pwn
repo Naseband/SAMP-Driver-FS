@@ -58,7 +58,7 @@ Latest Changenotes:
 
 #include <a_samp>
 #undef MAX_PLAYERS
-#define MAX_PLAYERS     		(1000)
+#define MAX_PLAYERS     	(1000)
 #include <FCNPC>
 #undef MAX_NODES
 #include <RouteConnector>
@@ -76,26 +76,26 @@ Latest Changenotes:
 #define INFO_DELAY              (300) // seconds
 #define MAP_ZONES               (false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT 			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS 			(70)
+#define DRIVER_AMOUNT 		(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_TAXIS 		(70)
 
 #define MAX_NODE_DIST       	(16.5)
 #define MIN_NODE_DIST           (6.0)
-#define SIDE_DIST       		(2.075)
+#define SIDE_DIST       	(2.075)
 
-#define MIN_SPEED       		(0.65)
-#define MAX_SPEED       		(1.85)
+#define MIN_SPEED       	(0.65)
+#define MAX_SPEED       	(1.85)
 
-#define MAX_PATH_LEN    		(1550)
+#define MAX_PATH_LEN    	(1550)
 
-#define TAXI_RANGE  			(35.0) // range to valid nodes (player)
+#define TAXI_RANGE  		(35.0) // range to valid nodes (player)
 #define TAXI_COOLDOWN       	(60) // seconds
 #define TAXI_TIMEOUT        	(40) // seconds
 
 #define DRIVER_RANGE_ROT_ONLY   (300.0) // If no player is in this range, the npc will move very roughly, else do only rotations
 #define DRIVER_RANGE_SMOOTH     (160.0) // If any player is in this range, an npc will do smooth movement
 
-#define ROUTE_MIN_DIST   		(650.0) // Minimum distance for random routes
+#define ROUTE_MIN_DIST   	(650.0) // Minimum distance for random routes
 
 #define DRIVERS_ROUTE_ID    	(10000) // Starting routeid for path calculations - change if conflicts arise
 #define DIALOG_ID               (10000) // Starting dialogid for dialogs - change if conflicts arise
@@ -119,11 +119,11 @@ Latest Changenotes:
 #define TAXI_STATE_WAIT1    	(2)
 #define TAXI_STATE_DRIVE2   	(3)
 
-#define ZONES_NUM 				(60) // This is just for determining npc distances to each other via integers, lower value means bigger zones
+#define ZONES_NUM 		(60) // This is just for determining npc distances to each other via integers, lower value means bigger zones
 
 #define DID_TAXI            	(DIALOG_ID + 0)
 
-#pragma dynamic 				(64*1000) // Needs to be higher for longer paths/more npcs!
+#pragma dynamic 		(64*1000) // Needs to be higher for longer paths/more npcs!
 
 // -----------------------------------------------------------------------------
 
