@@ -70,14 +70,13 @@ Latest Changenotes:
 
 // ----------------------------------------------------------------------------- CONFIG
 
-#define NPC_NAMES           		"DRIVER%003d" // %d will be replaced by the Drivers's ID (not NPC ID!)
+#define NPC_NAMES           	"DRIVER%003d" // %d will be replaced by the Drivers's ID (not NPC ID!)
 
 #define DEBUG_BUBBLE			(false) // Lets NPCs show info via chat bubbles
 #define DEBUG_PRINTS			(false) // Prints calculation times and warnings
 #define INFO_PRINTS				(true) // Prints Driver Info every X seconds
 #define INFO_DELAY				(300) // seconds
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
-<<<<<<< HEAD
 
 #define DRIVER_AMOUNT			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
 #define DRIVER_TAXIS			(70)
@@ -91,18 +90,6 @@ Latest Changenotes:
 
 #define JAM_DIST                (13.5) // Distance between 2 Drivers to make them slow down
 #define JAM_ANGLE               (25) // INT! Max angle distance between 2 Drivers to make them slow down
-=======
-
-#define DRIVER_AMOUNT			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS			(70)
-
-#define MAX_NODE_DIST			(16.5)
-#define MIN_NODE_DIST			(6.0)
-#define SIDE_DIST				(2.075)
-
-#define MIN_SPEED				(0.65)
-#define MAX_SPEED				(1.85)
->>>>>>> origin/master
 
 #define MAX_PATH_LEN    		(2000)
 
@@ -111,11 +98,7 @@ Latest Changenotes:
 #define TAXI_TIMEOUT			(40) // seconds
 
 #define DRIVER_RANGE_ROT_ONLY	(300.0) // If no player is in this range, the npc will move very roughly, else do only rotations
-<<<<<<< HEAD
 #define DRIVER_RANGE_SMOOTH		(190.0) // If any player is in this range, an npc will do smooth movement and drive more carefully
-=======
-#define DRIVER_RANGE_SMOOTH		(160.0) // If any player is in this range, an npc will do smooth movement
->>>>>>> origin/master
 
 #define ROUTE_MIN_DIST			(650.0) // Minimum distance for random routes
 
