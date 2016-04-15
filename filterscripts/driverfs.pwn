@@ -79,9 +79,9 @@ Latest Changenotes:
 #define INFO_DELAY				(300) // seconds
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT			(998)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS			(70)
-#define DRIVER_COPS             (100)
+#define DRIVER_AMOUNT			(300)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_TAXIS			(50)
+#define DRIVER_COPS             (40)
 
 #define MAX_NODE_DIST			(17.0)
 #define MIN_NODE_DIST			(3.5)
