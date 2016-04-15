@@ -57,6 +57,7 @@ Latest Changenotes:
 
 // -----------------------------------------------------------------------------
 
+#define SCRIPT_NAME             "driverfs" // The Scriptname (by default driverfs.pwn)
 
 #include <a_samp>
 #undef MAX_PLAYERS
@@ -78,12 +79,14 @@ Latest Changenotes:
 #define INFO_DELAY				(300) // seconds
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS			(70)
+#define DRIVER_AMOUNT			(200)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_TAXIS			(50)
 
 #define MAX_NODE_DIST			(17.0)
 #define MIN_NODE_DIST			(3.5)
 #define SIDE_DIST				(2.075)
+#define SMOOTH_W_DATA           (0.6) // Smoothing values, DATA - data weight, SMOOTH - smooth weight, should be bewtween 0.1 and 1.0
+#define SMOOTH_W_SMOOTH         (0.3)
 
 #define MIN_SPEED				(0.65)
 #define MAX_SPEED				(1.85)
@@ -93,14 +96,15 @@ Latest Changenotes:
 
 #define MAX_PATH_LEN    		(2000)
 
-#define TAXI_RANGE				(35.0) // range to valid nodes (player)
+#define MAX_TAXI_DIST           (3000.0) // Max Distance to a taxi to respond
+#define TAXI_RANGE				(35.0) // Max Range to closest nodes (Upon calling)
 #define TAXI_COOLDOWN			(60) // seconds
 #define TAXI_TIMEOUT			(40) // seconds
 
-#define DRIVER_RANGE_ROT_ONLY	(300.0) // If no player is in this range, the npc will move very roughly, else do only rotations
-#define DRIVER_RANGE_SMOOTH		(190.0) // If any player is in this range, an npc will do smooth movement and drive more carefully
+#define DRIVER_RANGE_ROT_ONLY	(310.0) // If no player is in this range, the npc will move very roughly, else do only rotations
+#define DRIVER_RANGE_SMOOTH		(225.0) // If any player is in this range, an npc will do smooth movement and drive more carefully
 
-#define ROUTE_MIN_DIST			(650.0) // Minimum distance for random routes
+#define ROUTE_MIN_DIST			(1200.0) // Minimum distance for random routes
 
 #define DRIVERS_ROUTE_ID		(10000) // Starting routeid for path calculations - change if conflicts arise
 #define DIALOG_ID				(10000) // Starting dialogid for dialogs - change if conflicts arise
@@ -124,7 +128,7 @@ Latest Changenotes:
 #define TAXI_STATE_WAIT1		(2)
 #define TAXI_STATE_DRIVE2		(3)
 
-#define ZONES_NUM				(60) // This is just for determining npc distances to each other via integers, lower value means bigger zones
+#define ZONES_NUM				(90) // This is just for determining npc distances to each other via integers, lower value means bigger zones
 
 #define DID_TAXI				(DIALOG_ID + 0)
 
@@ -222,35 +226,41 @@ new bool:InTaxiView[MAX_PLAYERS];
 
 enum E_DESTINATIONS
 {
-	destName[24],
+	destName[36],
 	Float:destX,
 	Float:destY,
 	Float:destZ
 };
 new gDestinationList[][E_DESTINATIONS] =
 {
-	{"Los Santos", 1643.2167, -2241.9209, 13.4900},
-	{"San Fierro", -1424.2325, -291.3162, 14.1484},
-	{"Las Venturas", 1682.3629, 1447.5713, 10.7722,},
-
+	{"Los Santos Airport", 1643.2167, -2241.9209, 13.4900},
 	{"Grove Street (LS)", 2500.9397, -1669.3757, 13.3438},
 	{"Skatepark (LS)", 1923.5677,-1403.0310,13.2974},
 	{"Mount Chiliad (LS)",  -2250.8413,-1719.0470,480.0685},
-
+	{"--------"},
+	{"San Fierro Airport", -1424.2325, -291.3162, 14.1484},
 	{"Jizzy's Club (SF)", -2625.6680, 1382.9760, 7.1820},
 	{"Wang Cars (SF)", -1976.1716, 287.7719, 35.1719},
-
-	{"Verdant Meadows (LV)", 399.0638, 2484.6252, 16.484375},
-
+	{"Avispa Country Club (SF)", -2723.8706, -312.4941, 7.1875},
+	{"Otto's Autos (SF)", -1628.4856, 1198.1681, 7.0391},
+	{"--------"},
+	{"Las Venturas Airport", 1682.3629, 1447.5713, 10.7722,},
+	{"Four Dragons Casino (LV)", 2033.4517, 1009.9388, 10.8203},
+	{"Caligula's Casino (LV)", 2158.8887, 1679.9889, 10.6953},
+	{"Yellow Bell Golf Club (LV)", 1464.2926, 2773.0825, 10.6719},
+    {"--------"},
 	{"Blueberry (LS)", 200.8919, -144.7279, 1.5859},
 	{"Palomino Creek (LS)", 2266.0808, 27.1097, 26.1645},
+	{"Dillimore (LS)", 660.9581, -535.4933, 16.3359},
 	{"Bayside (SF/LV)", -2466.1084, 2234.2334, 4.5125},
 	{"Angel Pine (SF/LS)", -2119.8252, -2492.1013, 30.6250},
 	{"El Quebrados (LV)", -1516.0896, 2540.1277, 55.6875},
 	{"Las Barrancas (LV)", -745.9706, 1565.6580, 26.9609},
-    {"Las Payasadas (LV)", -170.1701, 2693.7996, 62.4128}
+    {"Las Payasadas (LV)", -170.1701, 2693.7996, 62.4128},
+    {"Bone County (LV)", 712.7426, 1920.7234, 5.5391},
+    {"Verdant Meadows (LV)", 399.0638, 2484.6252, 16.484375}
 };
-new dialogstr[430];
+new gDestinationDialogSTR[678];
 
 new MaxPathLen = 0;
 
@@ -265,6 +275,8 @@ new updtimer = -1;
 new bool:Initialized = false;
 new InitialCalculations = 0, InitialCalculationStart;
 
+new NumRouteCalcs = 0, ExitPlayerID = -1; // Important for smooth FS unloading
+
 // -----------------------------------------------------------------------------
 
 public OnFilterScriptInit()
@@ -274,7 +286,7 @@ public OnFilterScriptInit()
 
 public OnFilterScriptExit()
 {
-	Drivers_Exit(0);
+	Drivers_Exit(1);
 }
 
 public OnGameModeInit()
@@ -284,7 +296,7 @@ public OnGameModeInit()
 
 public OnGameModeExit()
 {
-	Drivers_Exit(0);
+	Drivers_Exit(1);
 }
 
 // -----------------------------------------------------------------------------
@@ -297,7 +309,20 @@ Drivers_Init()
 
 	//CA_Init(); // You should uncomment this if you don't initialize ColAndreas before this FS gets loaded!
 
-	for(new i = 0; i < sizeof(gDestinationList); i ++) format(dialogstr, sizeof(dialogstr), "%s{999999}%s\n", dialogstr, gDestinationList[i][destName]);
+    format(gDestinationDialogSTR, sizeof(gDestinationDialogSTR), "");
+    
+    new minsize = sizeof(gDestinationList) * 9 + 1; // plus ("\n" + color code(8)) * number of entries
+	for(new i = 0; i < sizeof(gDestinationList); i ++) minsize += strlen(gDestinationList[i][destName]);
+	
+	if(sizeof(gDestinationDialogSTR) < minsize) printf("[DRIVERS] Warning: Higher the size of gDestinationDialogSTR from %d to at least %d. Not all Destinations can be displayed.", sizeof(gDestinationDialogSTR), minsize);
+    
+	for(new i = 0; i < sizeof(gDestinationList); i ++)
+	{
+	    if(strlen(gDestinationDialogSTR) >= sizeof(gDestinationDialogSTR) - strlen(gDestinationList[i][destName]) - 10) break; // In case gDestinationDialogSTR is too small, stop at the last Teleport that fits in to prevent cut-off
+
+		if(gDestinationList[i][destName][0] == '-') format(gDestinationDialogSTR, sizeof(gDestinationDialogSTR), "%s{666666}%s\n", gDestinationDialogSTR, gDestinationList[i][destName]);
+		else format(gDestinationDialogSTR, sizeof(gDestinationDialogSTR), "%s{999999}%s\n", gDestinationDialogSTR, gDestinationList[i][destName]);
+	}
 
 	if(rescuetimer != -1) KillTimer(rescuetimer);
 	rescuetimer = SetTimer("RescueTimer", 500, 1);
@@ -463,10 +488,10 @@ Drivers_Init()
 	return 1;
 }
 
-forward Drivers_Exit(force);
-public Drivers_Exit(force)
+forward Drivers_Exit(fastunload);
+public Drivers_Exit(fastunload)
 {
-	if(!Initialized && force == 0) return 1;
+	if(!Initialized && fastunload == 1) return 1;
 	
 	for(new i = 0; i < MAX_PLAYERS; i ++)
 	{
@@ -474,21 +499,7 @@ public Drivers_Exit(force)
 	    
 	    Taxi[i] = -1;
 	}
-	
-	for(new i = 0; i < DRIVER_AMOUNT; i ++)
-	{
-	    if(!Drivers[i][nUsed]) continue;
-	    
-	    Drivers[i][nUsed] = false;
-	    
-        if(GetVehicleModel(Drivers[i][nVehicle]) >= 400) DestroyVehicle(Drivers[i][nVehicle]);
-        
-        if(IsPlayerNPC(Drivers[i][nNPCID])) FCNPC_Destroy(Drivers[i][nNPCID]);
-        
-        Drivers[i][nNPCID] = -1;
-        Drivers[i][nVehicle] = -1;
-	}
-	
+
 	if(rescuetimer != -1) KillTimer(rescuetimer);
 	rescuetimer = -1;
 	
@@ -497,11 +508,89 @@ public Drivers_Exit(force)
 	updtimer = -1;
 	#endif
 	
+	if(fastunload == 0)
+	{
+	    print("[DRIVERS] Warning: Unloading Driver FS ...");
+	    SetTimerEx("Drivers_DestroyID", 1000, 0, "i", 0);
+	}
+	else
+	{
+	    for(new i = 0; i < DRIVER_AMOUNT; i ++)
+		{
+		    if(!Drivers[i][nUsed]) continue;
+
+		    Drivers[i][nUsed] = false;
+
+	        if(GetVehicleModel(Drivers[i][nVehicle]) >= 400) DestroyVehicle(Drivers[i][nVehicle]);
+
+	        if(IsPlayerNPC(Drivers[i][nNPCID])) FCNPC_Destroy(Drivers[i][nNPCID]);
+
+	        Drivers[i][nNPCID] = -1;
+	        Drivers[i][nVehicle] = -1;
+		}
+	}
+	
 	Initialized = false;
 	
-	if(force != 0) SendRconCommand("unloadfs NPCs_FS");
-	
 	return 1;
+}
+
+forward Drivers_DestroyID(count);
+public Drivers_DestroyID(count)
+{
+	if(count < 0 || count >= DRIVER_AMOUNT)
+	{
+	    if(count == DRIVER_AMOUNT)
+	    {
+	        Initialized = false;
+	        
+	        if(IsPlayerConnected(ExitPlayerID))
+		    {
+		    	SendClientMessage(ExitPlayerID, -1, "Driver FS unloaded.");
+		    	print("[DRIVERS] Warning: Driver FS unloaded.");
+			}
+	  		else print("[DRIVERS] Warning: Driver FS unloaded.");
+	        
+	        //SendRconCommand("unloadfs "SCRIPT_NAME);
+	        return 2;
+	    }
+	    return 0;
+	}
+	
+	if(NumRouteCalcs > 0)
+	{
+	    if(IsPlayerConnected(ExitPlayerID))
+	    {
+			new str[50];
+	    	format(str, sizeof(str), "Waiting for %d Path Calculations to proceed.", NumRouteCalcs);
+	    	SendClientMessage(ExitPlayerID, -1, str);
+	    	printf("[DRIVERS] Warning: Waiting for %d Path Calculations to proceed.", NumRouteCalcs);
+		}
+  		else printf("[DRIVERS] Warning: Waiting for %d Path Calculations to proceed.", NumRouteCalcs);
+  		
+	    SetTimerEx("Drivers_DestroyID", 3000, 0, "i", count);
+	    
+	    return 1;
+	}
+	
+	if(Drivers[count][nUsed])
+	{
+	    Drivers[count][nUsed] = false;
+
+	    if(FCNPC_IsValid(Drivers[count][nNPCID]))
+		{
+		    FCNPC_RemoveFromVehicle(Drivers[count][nNPCID]);
+			FCNPC_Destroy(Drivers[count][nNPCID]);
+		}
+		
+		if(GetVehicleModel(Drivers[count][nVehicle]) >= 400) DestroyVehicle(Drivers[count][nVehicle]);
+		
+	    Drivers[count][nNPCID] = -1;
+	    Drivers[count][nVehicle] = -1;
+    }
+    
+    SetTimerEx("Drivers_DestroyID", 7, 0, "i", ++count);
+    return 1;
 }
 
 
@@ -521,10 +610,18 @@ public OnPlayerCommandText(playerid, cmdtext[])
 	    new cmd[128], idx;
 		cmd = strtok(cmdtext, idx);
 	
-		if(strcmp(cmd, "/DriverFSExit", true) == 0) // Exits the script, should be used instead of unloadfs (unloadfs crashes the server) - unloads the FS after 5 seconds
+		if(strcmp(cmd, "/dfs_exit", true) == 0) // Exits the script, should be used instead of unloadfs (unloadfs crashes the server) - unloads the FS after 5 seconds
 		{
-			Initialized = false;
-			SetTimerEx("Drivers_Exit", 5000, 0, "d", 1);
+		    if(NumRouteCalcs == 0) SendClientMessage(playerid, -1, "Unloading Driver FS ...");
+		    else
+			{
+				format(cmd, sizeof(cmd), "There are %d Path Calculations left. The Script will unload once they are completed.", NumRouteCalcs);
+		    	SendClientMessage(playerid, -1, cmd);
+		    }
+		    
+		    ExitPlayerID = playerid;
+		    
+			Drivers_Exit(0);
 		    return 1;
 		}
 
@@ -558,7 +655,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 	    
 	    if(GetTickCount() - LastTaxiInteraction[playerid] < TAXI_COOLDOWN*1000) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have any available cabs right now."), 1;
 
-		new taxi = -1, Float:tdist = 1500.0, Float:X, Float:Y, Float:Z, destnode = -1;
+		new taxi = -1, Float:tdist = MAX_TAXI_DIST, Float:X, Float:Y, Float:Z, destnode = -1;
 		GetPlayerPos(playerid, X, Y, Z);
 		
 		destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE);
@@ -607,10 +704,6 @@ public OnPlayerCommandText(playerid, cmdtext[])
 		{
 		    pubCalculatePath(taxi, startnode, destnode);
 		    TaxiState[playerid] = TAXI_STATE_DRIVE1;
-		    
-		    if(tdist < 250.0) SendClientMessage(playerid, -1, "[Taxi Service]: {009900}Stay where you are. A driver is on his way!");
-			else if(tdist < 1000.0) SendClientMessage(playerid, -1, "[Taxi Service]: {DD9900}Please be patient, our driver may need some time to approach your location.");
-			else SendClientMessage(playerid, -1, "[Taxi Service]: {DD5500}We don't have a taxi close to you. Please wait a few minutes.");
 		}
 		
 		Taxi[playerid] = taxi;
@@ -618,6 +711,22 @@ public OnPlayerCommandText(playerid, cmdtext[])
 	    return 1;
 	}
 	
+	return 0;
+}
+
+public OnRconCommand(cmd[])
+{
+	if(strcmp(cmd, "dfs_exit", true) == 0)
+	{
+	    if(!Initialized) return print("[DRIVERS] Warning: Driver FS is not initialized (GMX?)."), 1;
+	    else
+		{
+		    ExitPlayerID = -1;
+			Drivers_Exit(0);
+		}
+			
+	    return 1;
+	}
 	return 0;
 }
 
@@ -635,7 +744,7 @@ public OnPlayerStateChange(playerid, newstate, oldstate)
 			{
 			    if(GetPlayerVehicleID(playerid) == Drivers[Taxi[playerid]][nVehicle])
 			    {
-			        ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", dialogstr, "Go", "Cancel");
+			        ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", gDestinationDialogSTR, "Go", "Cancel");
 			        SetVehicleParamsEx(Drivers[Taxi[playerid]][nVehicle], 1, 0, 0, 0, 0, 0, 0); 
 			        
 			        new Float:cX, Float:cY, Float:cZ, Float:A, Float:tX, Float:tY;
@@ -692,18 +801,24 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 	    
 	    if(response)
 	    {
+	        if(gDestinationList[listitem][destName] == '-')
+			{
+				ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", gDestinationDialogSTR, "Go", "Cancel");
+			    return SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Excuse me, can you re-phrase that?"), 1;
+			}
+			
 		    new destnode = NearestNodeFromPoint(gDestinationList[listitem][destX], gDestinationList[listitem][destY], gDestinationList[listitem][destZ], 100.0);
 
 		    if(IsNodeInPathFinder(destnode) < 1)
 			{
-				ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", dialogstr, "Go", "Cancel");
-			    return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Weird. I can't find that spot on my map!"), 1;
+				ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", gDestinationDialogSTR, "Go", "Cancel");
+			    return SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Weird. I can't find that spot on my map!"), 1;
 			}
 		    
 			if(GetDistanceBetweenNodes(NearestPlayerNode(playerid), destnode) < 100.0)
 			{
-			    ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", dialogstr, "Go", "Cancel");
-			    return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry, but this is not worth the petrol."), 1;
+			    ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", gDestinationDialogSTR, "Go", "Cancel");
+			    return SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Sorry, but this is not worth the petrol."), 1;
 			}
 
 		    Drivers[Taxi[playerid]][nState] = DRIVER_STATE_NONE;
@@ -757,6 +872,8 @@ public pubCalculatePath(driverid, startnode, endnode)
 	Drivers[driverid][nLT] = GetTickCount();
 	
     CalculatePath(startnode, endnode, DRIVERS_ROUTE_ID + driverid, false, _, true);
+    
+    NumRouteCalcs ++;
     
     Drivers[driverid][nLastDest] = endnode;
     
@@ -898,6 +1015,7 @@ stock PrintDriverUpdate()
 
 public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:distance,Float:Polygon[],Polygon_Size,Float:NodePosX[],Float:NodePosY[],Float:NodePosZ[])//Every processed Queue will be called here
 {
+    NumRouteCalcs --;
     if(!Initialized) return 1;
     
     if(InitialCalculations < DRIVER_AMOUNT) InitialCalculations ++;
@@ -1016,7 +1134,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		newpath[0][0] = DriverPath[driverid][0][0];
 		newpath[0][1] = DriverPath[driverid][0][1];
 		
-		newpath = smooth_path(newpath, DriverPathLen[driverid], 0.6, 0.3);
+		newpath = smooth_path(newpath, DriverPathLen[driverid], SMOOTH_W_DATA, SMOOTH_W_SMOOTH);
 		
 		new Float:MapZd, Float:MapZu;
 		
@@ -1053,7 +1171,14 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 
 	  	if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty] && IsPlayerConnected(Drivers[driverid][nPlayer]))
 	  	{
-	  	    if(TaxiState[Drivers[driverid][nPlayer]] == TAXI_STATE_DRIVE2)
+	  	    if(TaxiState[Drivers[driverid][nPlayer]] == TAXI_STATE_DRIVE1)
+			{
+			    if(distance < 250.0) SendClientMessage(Drivers[driverid][nPlayer], -1, "[Taxi Service]: {009900}Stay where you are. A driver is on his way!");
+				else if(distance < 1000.0) SendClientMessage(Drivers[driverid][nPlayer], -1, "[Taxi Service]: {DD9900}Please be patient, our driver may need some time to approach your location.");
+				else if(distance < 2000.0) SendClientMessage(Drivers[driverid][nPlayer], -1, "[Taxi Service]: {DD5500}We don't have a taxi close to you. Please wait a few minutes.");
+				else SendClientMessage(Drivers[driverid][nPlayer], -1, "[Taxi Service]: {DD5500}We hope you're not in a hurry. Our driver will need quite a while to come to you.");
+			}
+	  	    else if(TaxiState[Drivers[driverid][nPlayer]] == TAXI_STATE_DRIVE2)
 	  	    {
 		  	    new roughmins = floatround((distance / (8.3 * MAX_SPEED)) / 60.0);
 		  	    
@@ -1068,8 +1193,8 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 	  	}
 		
 		#if DEBUG_PRINTS == true
-		if(InitialCalculations <= DRIVER_AMOUNT) printf("[DRIVERS] (%d ms) - PathLen: %d - Nr %d/%d", GetTickCount() - t, DriverPathLen[driverid], InitialCalculations, DRIVER_AMOUNT);
-		else printf("[DRIVERS] (%d ms) - PathLen: %d", GetTickCount() - t, DriverPathLen[driverid]);
+		if(InitialCalculations <= DRIVER_AMOUNT) printf("[DRIVERS] Debug: (%d ms) - PathLen: %d - Nr %d/%d", GetTickCount() - t, DriverPathLen[driverid], InitialCalculations, DRIVER_AMOUNT);
+		else printf("[DRIVERS] Debug: (%d ms) - PathLen: %d", GetTickCount() - t, DriverPathLen[driverid]);
 		#endif
 		
 		if(InitialCalculations == DRIVER_AMOUNT) { printf("\n[DRIVERS] Initial calculations completed after %.02fs.", (GetTickCount() - InitialCalculationStart) / 1000.0); PrintDriverUpdate(); InitialCalculations = DRIVER_AMOUNT+1; }
@@ -1265,7 +1390,8 @@ public FCNPC_OnReachDestination(npcid)
 		  	    if(Adif > 50.0) Adif = 50.0;
 
 				AimedSpeed = AimedSpeed - ((AimedSpeed/80.0) * Adif);
-
+				
+				if(Drivers[driverid][nOnDuty] && Drivers[driverid][nType] == DRIVER_TYPE_TAXI) AimedSpeed *= 1.2;
 		  	}
 		  	else if(Drivers[driverid][nOnDuty] && Drivers[driverid][nType] == DRIVER_TYPE_TAXI) AimedSpeed = Drivers[driverid][nSpeed] * 0.7;
 		  	else AimedSpeed = (MIN_SPEED + MAX_SPEED) / 2.0;
