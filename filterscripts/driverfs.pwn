@@ -79,8 +79,9 @@ Latest Changenotes:
 #define INFO_DELAY				(300) // seconds
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT			(200)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
-#define DRIVER_TAXIS			(50)
+#define DRIVER_AMOUNT			(998)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_TAXIS			(70)
+#define DRIVER_COPS             (100)
 
 #define MAX_NODE_DIST			(17.0)
 #define MIN_NODE_DIST			(3.5)
@@ -113,6 +114,7 @@ Latest Changenotes:
 
 #define DRIVER_TYPE_RANDOM		(0)
 #define DRIVER_TYPE_TAXI		(1)
+#define DRIVER_TYPE_COP         (2)
 
 #define DRIVER_STATE_NONE		(0)
 #define DRIVER_STATE_DRIVE		(1)
@@ -141,7 +143,6 @@ enum E_DRIVERS
 	bool:nUsed,
 	bool:nOnDuty,
 	bool:nActive, // Active means a player is close (-> does all calculations)
-	bool:nIsCop,
 	nNPCID,
 	nType,
 	nState,
@@ -414,35 +415,37 @@ Drivers_Init()
 		if(i < DRIVER_TAXIS)
 		{
 			Drivers[i][nType] = DRIVER_TYPE_TAXI;
-			Drivers[i][nIsCop] = false;
 			
 			vmodel = (random(2) == 0 ? 420 : 438);
 			skinid = TaxiSkins[random(sizeof(TaxiSkins))];
+			colors = {-1, -1};
+		}
+		else if(i < DRIVER_COPS + DRIVER_TAXIS)
+		{
+		    Drivers[i][nType] = DRIVER_TYPE_COP;
+		    
+		    switch(random(4))
+		    {
+		        case 0: vmodel = 596;
+		        case 1: vmodel = 597;
+		        case 2: vmodel = 598;
+		        case 3: vmodel = 599;
+		    }
+		    
+		    skinid = CopSkins[random(sizeof(CopSkins))];
 			colors = {-1, -1};
 		}
 		else
 		{
 			Drivers[i][nType] = DRIVER_TYPE_RANDOM;
 			
-			vmodel = RandomVehicleList[random(VehicleListNum)];
-			
-			switch(vmodel) // Decide whether that driver is a cop or not by vehicle model (makes them a bit rare on purpose)
+			do
 			{
-			    case 596, 597, 598, 599:
-			    {
-			        Drivers[i][nIsCop] = true;
-			        
-			        skinid = CopSkins[random(sizeof(CopSkins))];
-			        colors = {-1, -1};
-			    }
-			    default:
-			    {
-			        Drivers[i][nIsCop] = false;
-			        
-			        skinid = DriverSkins[random(sizeof(DriverSkins))];
-			        colors[0] = random(127), colors[1] = random(127);
-			    }
-			}
+				vmodel = RandomVehicleList[random(VehicleListNum)];
+			} while(vmodel == 596 || vmodel == 597 || vmodel == 598 || vmodel == 599 || vmodel == 420 || vmodel == 438);
+	        
+	        skinid = DriverSkins[random(sizeof(DriverSkins))];
+	        colors[0] = random(127), colors[1] = random(127);
 		}
 
 		Drivers[i][nVehicle] = CreateVehicle(vmodel, X, Y, Z + 100000.0, 0.0, colors[0], colors[1], 128); // Spawn somewhere where noone ever will get! This prevents FCNPC's spawn flickering (vehicles showing up at spawn coords between movements for < 1ms (annoying when driving into them just then!))
@@ -483,7 +486,9 @@ Drivers_Init()
 		pubCalculatePath(i, startnode, endnode);
 	}
 
-	printf("\n\n[DRIVERS] Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d\n          maxnpc: %d, Other NPCs: %d\n          Number of random nodes: %d\n\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS), DRIVER_TAXIS, maxnpc, othernpcs, RandomNodesNum);
+	printf("\n\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d\n   Number of random nodes: %d\n\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, RandomNodesNum);
+	
+	print("   Initial Calculations started, please wait a moment to finish ...");
 	
 	return 1;
 }
@@ -1007,7 +1012,7 @@ stock PrintDriverUpdate()
 	rtm = (rtms / 60000) % 60;
 	rth = rtms / 36000000;
 
-	printf("\n[DRIVERS] Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d\n          maxnpc: %d, Other NPCs: %d, Idle NPCs: %d\n          Number of random nodes: %d\n          MaxPathLen: %d/%d, Uptime: %02d:%02d:%02d\n -  -  -  Avg. calc. time: %.02fms, Avg. Server Tick: %.02f\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS), DRIVER_TAXIS, maxnpc, othernpcs, idlenpcs, RandomNodesNum, MaxPathLen, MAX_PATH_LEN, rth, rtm, rts, avgcalctime, avgtick);
+	printf("\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d, Idle NPCs: %d\n   Number of random nodes: %d\n   MaxPathLen: %d/%d, Uptime: %02d:%02d:%02d\n -  -  -  Avg. calc. time: %.02fms, Avg. Server Tick: %.02f\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, idlenpcs, RandomNodesNum, MaxPathLen, MAX_PATH_LEN, rth, rtm, rts, avgcalctime, avgtick);
 	return 1;
 }
 
@@ -1236,19 +1241,24 @@ public FCNPC_OnReachDestination(npcid)
 		
 		Drivers[driverid][nCurNode] ++;
 		
-		if(Drivers[driverid][nIsCop] && random(100) <= 2)
+		if(Drivers[driverid][nType] == DRIVER_TYPE_COP && random(100) <= 2)
 		{
-		    if(Drivers[driverid][nLT] - Drivers[driverid][nCopStuffTick] > 9000 && FCNPC_IsVehicleSiren(npcid)) FCNPC_SetVehicleSiren(npcid, false);
-		    else if(Drivers[driverid][nLT] - Drivers[driverid][nCopStuffTick] > 90000 && !FCNPC_IsVehicleSiren(npcid))
+		    if(Drivers[driverid][nLT] - Drivers[driverid][nCopStuffTick] > 9000 && Drivers[driverid][nOnDuty])
+			{
+				FCNPC_SetVehicleSiren(npcid, false);
+				Drivers[driverid][nOnDuty] = false;
+			}
+		    else if(Drivers[driverid][nLT] - Drivers[driverid][nCopStuffTick] > 90000 && !Drivers[driverid][nOnDuty])
 		    {
 		        Drivers[driverid][nCopStuffTick] = Drivers[driverid][nLT];
 		        FCNPC_SetVehicleSiren(npcid, true);
+		        Drivers[driverid][nOnDuty] = true;
 		    }
 		}
 		
 		if(Drivers[driverid][nCurNode] == DriverPathLen[driverid]) // Final Destination! >:D
 		{
-		    if(Drivers[driverid][nType] == DRIVER_TYPE_RANDOM || (Drivers[driverid][nType] == DRIVER_TYPE_TAXI && !Drivers[driverid][nOnDuty]))
+		    if(Drivers[driverid][nType] == DRIVER_TYPE_RANDOM || (Drivers[driverid][nType] == DRIVER_TYPE_TAXI && !Drivers[driverid][nOnDuty]) || Drivers[driverid][nType] == DRIVER_TYPE_COP)
 		    {
 		        Drivers[driverid][nState] = DRIVER_STATE_NONE;
 		        
@@ -1265,8 +1275,7 @@ public FCNPC_OnReachDestination(npcid)
 		        
 		        SetTimerEx("pubCalculatePath", 300, 0, "ddd", driverid, startnode, endnode);
 		    }
-		    
-		    if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty])
+		    else if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty])
 		    {
 		        Drivers[driverid][nState] = DRIVER_STATE_NONE;
 		        new playerid = Drivers[driverid][nPlayer];
@@ -1403,7 +1412,7 @@ public FCNPC_OnReachDestination(npcid)
 	  	if(Drivers[driverid][nSpeed] > MAX_SPEED) Drivers[driverid][nSpeed] = MAX_SPEED;
 	  	if(Drivers[driverid][nSpeed] < MIN_SPEED) Drivers[driverid][nSpeed] = MIN_SPEED;
 	  	
-	  	if(!blocked && FCNPC_IsVehicleSiren(npcid)) Drivers[driverid][nSpeed] += 0.45;
+	  	if(!blocked && Drivers[driverid][nType] == DRIVER_TYPE_COP && Drivers[driverid][nOnDuty]) Drivers[driverid][nSpeed] += 0.45;
 	  	
         new Float:Qw, Float:Qx, Float:Qy, Float:Qz;
 		FCNPC_GetPosition(npcid, X, Y, Z);
