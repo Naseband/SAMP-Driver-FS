@@ -9,7 +9,7 @@ To find bugs and improve its features we decided to release this compact version
 
 Please post any suggestions or buggy encounters to our thread in the official SA-MP Forums (http://forum.sa-mp.com/showthread.php?t=587634). Thanks!
 
-Note: The steep-hills-glitch (vehicles snapping around while driving up/down) is not possible to fix script-wise. This is probably caused by the "smooth" but unprecise movement of NPCs.
+Note: The steep-hills-glitch (vehicles snapping around while driving up/down) is not possible to fix script-wise. This is probably caused by the "smooth" but unprecise movement of NPCs client-sided and the node distances (Z not always precise).
 
 ---------------
 
@@ -18,7 +18,6 @@ Note: The steep-hills-glitch (vehicles snapping around while driving up/down) is
 	AIped - Initiator of the 2013 version, help, ideas, scripting, ...
 	Gamer_Z - RouteConnector Plugin, QuaternionStuff Plugin and great help with some math-problems
 	OrMisicL & ZiGGi - FCNPC Plugin
-	Incognito - Streamer Plugin
 	Pottus and other developers of ColAndreas
 
 Feel free to use and modify as you wish, but don't re-release this without our permission!
@@ -34,6 +33,7 @@ Latest Changenotes:
 - Added Skin Arrays for different types (Civ, Cops, Taxis)
 - There is a very rough time measurement now when you choose your destination
 - Fixed stop'n'go (Using math instead of crappy distance guesses)
+- Better and more efficient movement streaming method (based on NPC Streaming..) - streamer not required anymore
 
 [v1.2]
 
@@ -67,9 +67,11 @@ Latest Changenotes:
 #include <RouteConnector>
 #include <ColAndreas>
 #include <QuaternionStuff>
-#include <streamer>
 
 // ----------------------------------------------------------------------------- CONFIG
+
+// Driver Streaming:            The drivers get "streamed" whether a player is around or not. This was relying on streamer areas before,
+//									but I changed it to depend on the NPC Streaming mechanism
 
 #define NPC_NAMES           	"DRIVER%003d" // %d will be replaced by the Drivers's ID (not NPC ID!)
 
@@ -79,9 +81,9 @@ Latest Changenotes:
 #define INFO_DELAY				(300) // seconds
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT			(300)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_AMOUNT			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
 #define DRIVER_TAXIS			(50)
-#define DRIVER_COPS             (40)
+#define DRIVER_COPS             (50)
 
 #define MAX_NODE_DIST			(17.0)
 #define MIN_NODE_DIST			(3.5)
@@ -89,10 +91,11 @@ Latest Changenotes:
 #define SMOOTH_W_DATA           (0.6) // Smoothing values, DATA - data weight, SMOOTH - smooth weight, should be bewtween 0.1 and 1.0
 #define SMOOTH_W_SMOOTH         (0.3)
 
-#define MIN_SPEED				(0.65)
+#define MIN_SPEED				(0.45)
 #define MAX_SPEED				(1.85)
+#define DUTY_SPEED_BOOST        (1.125) // Speed boost when on duty (Cops, Taxi)
 
-#define JAM_DIST                (13.5) // Distance between 2 Drivers to make them slow down
+#define JAM_DIST                (15.0) // Distance between 2 Drivers to make them slow down
 #define JAM_ANGLE               (25) // INT! Max angle distance between 2 Drivers to make them slow down
 
 #define MAX_PATH_LEN    		(2000)
@@ -101,9 +104,6 @@ Latest Changenotes:
 #define TAXI_RANGE				(35.0) // Max Range to closest nodes (Upon calling)
 #define TAXI_COOLDOWN			(60) // seconds
 #define TAXI_TIMEOUT			(40) // seconds
-
-#define DRIVER_RANGE_ROT_ONLY	(310.0) // If no player is in this range, the npc will move very roughly, else do only rotations
-#define DRIVER_RANGE_SMOOTH		(225.0) // If any player is in this range, an npc will do smooth movement and drive more carefully
 
 #define ROUTE_MIN_DIST			(1200.0) // Minimum distance for random routes
 
@@ -156,8 +156,6 @@ enum E_DRIVERS
 	nLT, // Last Tick
 	nCopStuffTick,
 	nCalcFails,
-	nStreamingAreaS,
-	nStreamingAreaL,
 	nZoneX,
 	nZoneY
 	
@@ -166,6 +164,7 @@ enum E_DRIVERS
 	#endif
 };
 new Drivers[DRIVER_AMOUNT][E_DRIVERS];
+new NPCDriverID[MAX_PLAYERS] = {-1, ...};
 
 new Float:DriverPath[DRIVER_AMOUNT][MAX_PATH_LEN][3];
 new DriverPathLen[DRIVER_AMOUNT];
@@ -374,6 +373,8 @@ Drivers_Init()
 
 	    Taxi[i] = -1;
 	    LastTaxiInteraction[i] = GetTickCount() - TAXI_COOLDOWN*1000;
+	    
+	    NPCDriverID[i] = -1;
 	}
 
 	new maxnpc = GetServerVarAsInt("maxnpc"), othernpcs = 0;
@@ -454,11 +455,13 @@ Drivers_Init()
 
 		Drivers[i][nNPCID] = FCNPC_Create(npcname);
 		
-		if(!IsPlayerNPC(Drivers[i][nNPCID]))
+		if(!FCNPC_IsValid(Drivers[i][nNPCID]))
 		{
 		    printf("[DRIVERS] Error: Failed creating NPC (Driver ID %d). Aborted!", i);
 			break;
 		}
+		
+		NPCDriverID[Drivers[i][nNPCID]] = i;
 		
 		FCNPC_Spawn(Drivers[i][nNPCID], skinid, X, Y, Z + VehicleZOffsets[vmodel - 400]);
 		FCNPC_PutInVehicle(Drivers[i][nNPCID], Drivers[i][nVehicle], 0);
@@ -475,13 +478,6 @@ Drivers_Init()
 		#if MAP_ZONES == true
 		Drivers[i][nGangZone] = -1;
 		#endif
-		
-		Drivers[i][nStreamingAreaS] = CreateDynamicSphere(0.0, 0.0, 0.0, DRIVER_RANGE_SMOOTH, -1, -1, -1);
-		Drivers[i][nStreamingAreaL] = CreateDynamicSphere(0.0, 0.0, 0.0, DRIVER_RANGE_ROT_ONLY, -1, -1, -1);
-		Streamer_SetIntData(STREAMER_TYPE_AREA, Drivers[i][nStreamingAreaS], E_STREAMER_EXTRA_ID, -1);
-		Streamer_SetIntData(STREAMER_TYPE_AREA, Drivers[i][nStreamingAreaL], E_STREAMER_EXTRA_ID, -1);
-		AttachDynamicAreaToPlayer(Drivers[i][nStreamingAreaS], Drivers[i][nNPCID]);
-		AttachDynamicAreaToPlayer(Drivers[i][nStreamingAreaL], Drivers[i][nNPCID]);
 		
 		pubCalculatePath(i, startnode, endnode);
 	}
@@ -503,6 +499,7 @@ public Drivers_Exit(fastunload)
 	    if(IsPlayerConnected(i) && !IsPlayerNPC(i) && InTaxiView[i]) SetCameraBehindPlayer(i);
 	    
 	    Taxi[i] = -1;
+	    NPCDriverID[i] = -1;
 	}
 
 	if(rescuetimer != -1) KillTimer(rescuetimer);
@@ -528,7 +525,7 @@ public Drivers_Exit(fastunload)
 
 	        if(GetVehicleModel(Drivers[i][nVehicle]) >= 400) DestroyVehicle(Drivers[i][nVehicle]);
 
-	        if(IsPlayerNPC(Drivers[i][nNPCID])) FCNPC_Destroy(Drivers[i][nNPCID]);
+	        if(FCNPC_IsValid(Drivers[i][nNPCID])) FCNPC_Destroy(Drivers[i][nNPCID]);
 
 	        Drivers[i][nNPCID] = -1;
 	        Drivers[i][nVehicle] = -1;
@@ -586,6 +583,7 @@ public Drivers_DestroyID(count)
 		{
 		    FCNPC_RemoveFromVehicle(Drivers[count][nNPCID]);
 			FCNPC_Destroy(Drivers[count][nNPCID]);
+			NPCDriverID[Drivers[count][nNPCID]] = -1;
 		}
 		
 		if(GetVehicleModel(Drivers[count][nVehicle]) >= 400) DestroyVehicle(Drivers[count][nVehicle]);
@@ -603,7 +601,18 @@ public Drivers_DestroyID(count)
 
 public OnPlayerConnect(playerid)
 {
+	if(!Initialized) return 1;
+	
 	if(!IsPlayerNPC(playerid)) LastTaxiInteraction[playerid] = GetTickCount() - TAXI_COOLDOWN*1000;
+	
+	return 1;
+}
+
+public OnPlayerDisconnect(playerid)
+{
+    if(!Initialized) return 1;
+	
+	return 1;
 }
 
 public OnPlayerCommandText(playerid, cmdtext[])
@@ -851,16 +860,6 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 	return 1;
 }
 
-public OnPlayerEnterDynamicArea(playerid, areaid)
-{
-	return 1;
-}
-
-public OnPlayerLeaveDynamicArea(playerid, areaid)
-{
-	return 1;
-}
-
 // -----------------------------------------------------------------------------
 
 forward pubCalculatePath(driverid, startnode, endnode);
@@ -981,7 +980,7 @@ public RescueTimer()
 forward PrintDriverUpdate();
 public PrintDriverUpdate()
 #else
-stock PrintDriverUpdate()
+PrintDriverUpdate()
 #endif
 {
 	new curtick = GetTickCount();
@@ -1010,7 +1009,7 @@ stock PrintDriverUpdate()
 	
 	rts = (rtms / 1000) % 60;
 	rtm = (rtms / 60000) % 60;
-	rth = rtms / 36000000;
+	rth = rtms / (1000*60*60);
 
 	printf("\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d, Idle NPCs: %d\n   Number of random nodes: %d\n   MaxPathLen: %d/%d, Uptime: %02d:%02d:%02d\n -  -  -  Avg. calc. time: %.02fms, Avg. Server Tick: %.02f\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, idlenpcs, RandomNodesNum, MaxPathLen, MAX_PATH_LEN, rth, rtm, rts, avgcalctime, avgtick);
 	return 1;
@@ -1185,7 +1184,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 			}
 	  	    else if(TaxiState[Drivers[driverid][nPlayer]] == TAXI_STATE_DRIVE2)
 	  	    {
-		  	    new roughmins = floatround((distance / (8.3 * MAX_SPEED)) / 60.0);
+		  	    new roughmins = floatround((distance / (8.3 * (MAX_SPEED * DUTY_SPEED_BOOST))) / 60.0);
 		  	    
 		  	    if(roughmins <= 1) SendClientMessage(Drivers[driverid][nPlayer], -1, "[Taxi Driver]: {009900}I don't like these short ways...");
 		  	    else
@@ -1220,16 +1219,7 @@ public FCNPC_OnReachDestination(npcid)
 {
     if(!Initialized) return 1;
     
-    new driverid = -1;
-	for(new i = 0; i < DRIVER_AMOUNT; i ++)
-	{
-	    if(npcid != Drivers[i][nNPCID] || !Drivers[i][nUsed]) continue;
-
-		if(Drivers[i][nState] != DRIVER_STATE_DRIVE) break;
-
-	    driverid = i;
-	    break;
-	}
+    new driverid = GetDriverID(npcid);
 
     if(driverid != -1)
 	{
@@ -1305,8 +1295,16 @@ public FCNPC_OnReachDestination(npcid)
 		}
 		
 		new cnode = Drivers[driverid][nCurNode];
-		
-		if(!IsAnyPlayerInDynamicArea(Drivers[driverid][nStreamingAreaL], 1))
+
+        #if MAP_ZONES == true
+        new Float:X, Float:Y, Float:Z;
+		FCNPC_GetPosition(npcid, X, Y, Z);
+        
+		Drivers[driverid][nGangZone] = GangZoneCreate(X-4.5, Y-4.5, X+4.5, Y+4.5);
+		GangZoneShowForAll(Drivers[driverid][nGangZone], 0x66FF00FF);
+		#endif
+
+		if(!FCNPC_IsStreamedForAnyone(npcid))
 		{
 		    if(Drivers[driverid][nCurNode] < DriverPathLen[driverid]-10)
 		    {
@@ -1316,29 +1314,16 @@ public FCNPC_OnReachDestination(npcid)
 		    FCNPC_GoTo(npcid, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], MOVE_TYPE_DRIVE, MAX_SPEED*0.8, false, 0.0, true);
 		    Drivers[driverid][nSpeed] = MAX_SPEED*0.7;
 		    Drivers[driverid][nActive] = false;
-
+            
 		    return 1;
-		}
-		
-		if(!IsAnyPlayerInDynamicArea(Drivers[driverid][nStreamingAreaS], 1))
-		{
-		    new Float:X, Float:Y, Float:Z, Float:Qw, Float:Qx, Float:Qy, Float:Qz;
-			FCNPC_GetPosition(npcid, X, Y, Z);
-			GetQuatRotForVehBetweenCoords2D(X, Y, Z, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], Qw, Qx, Qy, Qz);
-			
-	        FCNPC_GoTo(npcid, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], MOVE_TYPE_DRIVE, MAX_SPEED*0.7, false, 0.0, false);
-	        FCNPC_SetQuaternion(npcid, Qw, Qx, Qy, Qz);
-	        
-	        Drivers[driverid][nSpeed] = MAX_SPEED*0.7;
-	        Drivers[driverid][nActive] = false;
-
-	        return 1;
 		}
 		
 		Drivers[driverid][nActive] = true;
 		
-	    new Float:X, Float:Y, Float:Z;
+		#if MAP_ZONES != true
+		new Float:X, Float:Y, Float:Z;
 		FCNPC_GetPosition(npcid, X, Y, Z);
+		#endif
 		
 		if(X < -3000.0) X = -3000.0;
 		if(X > 3000.0) X = 3000.0;
@@ -1348,8 +1333,7 @@ public FCNPC_OnReachDestination(npcid)
 		Drivers[driverid][nZoneX] = floatround((X + 3000.0) / 6000.0 * ZONES_NUM);
 		Drivers[driverid][nZoneY] = floatround((Y + 3000.0) / 6000.0 * ZONES_NUM);
 		
-		new Float:A1 = FCNPC_GetAngle(Drivers[driverid][nNPCID]), Float:A2, bool:blocked = false, Float:x2, Float:y2, Float:z2;
-		
+		new Float:A1, Float:A2, bool:blocked = false, Float:x2, Float:y2, Float:z2, Float:dist;
 		GetVehicleZAngle(Drivers[driverid][nVehicle], A1);
 		
 		for(new i = 0; i < DRIVER_AMOUNT; i ++)
@@ -1362,17 +1346,21 @@ public FCNPC_OnReachDestination(npcid)
 		    
 		    FCNPC_GetPosition(Drivers[i][nNPCID], x2, y2, z2);
 
-		    if(floatsqroot(floatpower(x2-X, 2) + floatpower(y2-Y, 2)) >= JAM_DIST) continue; // Distance between both NPCs
+			dist = floatsqroot(floatpower(x2-X, 2) + floatpower(y2-Y, 2));
 
-		    GetVehicleZAngle(Drivers[i][nVehicle], A2);
+		    if(dist >= JAM_DIST) continue; // Distance between both NPCs
+
+		    GetVehicleZAngle(Drivers[driverid][nVehicle], A2);
 		    
 		    if(floatangledist(A1, A2) >= JAM_ANGLE) continue; // Angle distance between both NPCs (do they face the same direction?)
 		    
 		    if(floatangledist(A1, 360.0-atan2(x2-X, y2-Y)) >= JAM_ANGLE) continue; // Angle distance between NPC1 and the direction to NPC2 (is NPC1 going in NPC2's direction?) - Criteria for being behind!
 
 		    blocked = true;
-		    if(Drivers[driverid][nSpeed] >= Drivers[i][nSpeed]-0.1) Drivers[driverid][nSpeed] = Drivers[i][nSpeed] - 0.1;
-		    else Drivers[driverid][nSpeed] -= (0.05 + (random(1000)/10000.0));
+		    if(Drivers[driverid][nSpeed] >= Drivers[i][nSpeed]) Drivers[driverid][nSpeed] = Drivers[i][nSpeed] - 0.1;
+		    else Drivers[driverid][nSpeed] -= 0.04;
+		    
+		    if(dist < JAM_DIST/2.0) Drivers[driverid][nSpeed] = Drivers[i][nSpeed] - 0.1;
 		    
 		    break;
 		}
@@ -1380,7 +1368,7 @@ public FCNPC_OnReachDestination(npcid)
 		if(!blocked)
 		{
 			new Float:AimedSpeed;
-			if(cnode > 1 && cnode < DriverPathLen[driverid]-3)
+			if(cnode > 1 && cnode < DriverPathLen[driverid]-6)
 			{
 				new Float:Xdif = DriverPath[driverid][cnode][0] - X, Float:Ydif = DriverPath[driverid][cnode][1] - Y, Float:Zdif = DriverPath[driverid][cnode][2] - Z;
 
@@ -1396,23 +1384,21 @@ public FCNPC_OnReachDestination(npcid)
 			  	new Float:Adif = Get2DAngleOf3Points(DriverPath[driverid][cnode-1][0], DriverPath[driverid][cnode-1][1], DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode+1][0], DriverPath[driverid][cnode+1][1]);
 
 		  	    if(Adif < 0.0) Adif *= -1.0;
-		  	    if(Adif > 50.0) Adif = 50.0;
+		  	    if(Adif > 40.0) Adif = 40.0;
 
-				AimedSpeed = AimedSpeed - ((AimedSpeed/80.0) * Adif);
-				
-				if(Drivers[driverid][nOnDuty] && Drivers[driverid][nType] == DRIVER_TYPE_TAXI) AimedSpeed *= 1.2;
+				AimedSpeed = AimedSpeed - ((AimedSpeed/60.0) * Adif);
 		  	}
 		  	else if(Drivers[driverid][nOnDuty] && Drivers[driverid][nType] == DRIVER_TYPE_TAXI) AimedSpeed = Drivers[driverid][nSpeed] * 0.7;
 		  	else AimedSpeed = (MIN_SPEED + MAX_SPEED) / 2.0;
 
-		  	if(AimedSpeed < Drivers[driverid][nSpeed]) Drivers[driverid][nSpeed] = (Drivers[driverid][nSpeed] + AimedSpeed*4.0) / 5.0;
-		  	else Drivers[driverid][nSpeed] += (AimedSpeed - Drivers[driverid][nSpeed]) / (Drivers[driverid][nSpeed]*7.0) + 0.02;
+		  	if(AimedSpeed < Drivers[driverid][nSpeed]) Drivers[driverid][nSpeed] = (Drivers[driverid][nSpeed] + AimedSpeed*4.5) / 5.5;
+		  	else Drivers[driverid][nSpeed] += (AimedSpeed - Drivers[driverid][nSpeed]) / (Drivers[driverid][nSpeed]*10.0) + 0.02;
 		}
 		
 	  	if(Drivers[driverid][nSpeed] > MAX_SPEED) Drivers[driverid][nSpeed] = MAX_SPEED;
 	  	if(Drivers[driverid][nSpeed] < MIN_SPEED) Drivers[driverid][nSpeed] = MIN_SPEED;
 	  	
-	  	if(!blocked && Drivers[driverid][nType] == DRIVER_TYPE_COP && Drivers[driverid][nOnDuty]) Drivers[driverid][nSpeed] += 0.45;
+	  	if(!blocked && Drivers[driverid][nOnDuty] && cnode < DriverPathLen[driverid]-6) Drivers[driverid][nSpeed] *= DUTY_SPEED_BOOST;
 	  	
         new Float:Qw, Float:Qx, Float:Qy, Float:Qz;
 		FCNPC_GetPosition(npcid, X, Y, Z);
@@ -1420,11 +1406,6 @@ public FCNPC_OnReachDestination(npcid)
 
 		FCNPC_GoTo(npcid, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], MOVE_TYPE_DRIVE, Drivers[driverid][nSpeed], false, 0.0, false);
         FCNPC_SetQuaternion(npcid, Qw, Qx, Qy, Qz);
-
-		#if MAP_ZONES == true
-		Drivers[driverid][nGangZone] = GangZoneCreate(X-4.5, Y-4.5, X+4.5, Y+4.5);
-		GangZoneShowForAll(Drivers[driverid][nGangZone], 0x66FF00FF);
-		#endif
 
 	    #if DEBUG_BUBBLE == true
 		new str[65];
@@ -1496,7 +1477,7 @@ stock strtok(const string[], &index) // Please don't complain about this - it wi
 
 stock HidePlayerDialog(playerid) return ShowPlayerDialog(playerid,-1,0," "," "," "," ");
 
-stock GetRandomNode()
+GetRandomNode()
 {
 	if(RandomNodesNum < 1 || RandomNodesNum >= MAX_RANDOM_NODES) return -1;
 	
@@ -1516,11 +1497,31 @@ Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist)
 	else return -999.0;
 }
 
-stock floatangledist(Float:alpha, Float:beta) // Ranging from 0 to 180, not directional (left/right)
+floatangledist(Float:alpha, Float:beta) // Ranging from 0 to 180, not directional (left/right)
 {
     new phi = floatround(floatabs(beta - alpha), floatround_floor) % 360;
     new distance = phi > 180 ? 360 - phi : phi;
     return distance;
+}
+
+GetDriverID(npcid) // Fast NPCID -> DriverID
+{
+	if(!FCNPC_IsValid(npcid) || npcid < 0 || npcid >= MAX_PLAYERS) return -1;
+	
+	new id = NPCDriverID[npcid];
+	
+	if(id >= 0 && id < DRIVER_AMOUNT) if(Drivers[id][nUsed] && Drivers[id][nNPCID] == npcid) return id;
+
+	id = -1;
+	
+	for(new i = 0; i < DRIVER_AMOUNT; i ++)
+	{
+	    if(npcid != Drivers[i][nNPCID] || !Drivers[i][nUsed]) continue;
+
+	    return i;
+	}
+	
+	return -1;
 }
 
 // --- EOF ---
