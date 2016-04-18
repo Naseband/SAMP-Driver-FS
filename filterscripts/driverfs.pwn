@@ -27,13 +27,14 @@ Feel free to use and modify as you wish, but don't re-release this without our p
 Latest Changenotes:
 [v1.2.1]
 
-- Support for newest (1.0.4) FCNPC version
 - Added Cops (count as civilains)
    Cops turn on the sirens sometimes to annoy their surroundings
 - Added Skin Arrays for different types (Civ, Cops, Taxis)
 - There is a very rough time measurement now when you choose your destination
 - Fixed stop'n'go (Using math instead of crappy distance guesses)
 - Better and more efficient movement streaming method (based on NPC Streaming..) - streamer not required anymore
+- Automatic start & end node calculation based for parking lots (1-connection nodes) + new GPS.dat with many
+	fixes and a lot of new parking lots and improvements -> NPCs actually drive somewhere and wait a bit (will be extended)
 
 [v1.2]
 
@@ -47,7 +48,7 @@ Latest Changenotes:
 
 [v1.1]
 
-- Improved random start- and destination node calculations (added RandomNodes array), also improves NPC spreading around the world
+- Improved random start- and destination node calculations (added PathNodes array), also improves NPC spreading around the world
 - Shortened paths on recalculations (performance improvement)
 - Improved speed calculations, speed changes over time by steepness and turning radiuses
 - Brakes when near to destination
@@ -81,7 +82,7 @@ Latest Changenotes:
 #define INFO_DELAY				(300) // seconds
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 
-#define DRIVER_AMOUNT			(250)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
+#define DRIVER_AMOUNT			(300)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount
 #define DRIVER_TAXIS			(50)
 #define DRIVER_COPS             (50)
 
@@ -105,7 +106,8 @@ Latest Changenotes:
 #define TAXI_COOLDOWN			(60) // seconds
 #define TAXI_TIMEOUT			(40) // seconds
 
-#define ROUTE_MIN_DIST			(1200.0) // Minimum distance for random routes
+#define ROUTE_MIN_DIST			(500.0)
+#define ROUTE_MAX_DIST          (1750.0)
 
 #define DRIVERS_ROUTE_ID		(10000) // Starting routeid for path calculations - change if conflicts arise
 #define DIALOG_ID				(10000) // Starting dialogid for dialogs - change if conflicts arise
@@ -123,7 +125,7 @@ Latest Changenotes:
 #define MAX_SMOOTH_PATH			(MAX_PATH_LEN + 1)
 #define S_DIMENSIONS			(2)  // We only smooth x/y here
 
-#define MAX_RANDOM_NODES		(3650)
+#define MAX_PATH_NODES			(500)
 
 #define TAXI_STATE_NONE			(0)
 #define TAXI_STATE_DRIVE1		(1)
@@ -215,7 +217,26 @@ new TaxiSkins[] = // Skin IDs for taxi drivers - kind of randomly picked
 	188, 20, 36, 262, 7, 56
 };
 
-new RandomNodes[MAX_RANDOM_NODES], RandomNodesNum = 0;
+new PathNodes[MAX_PATH_NODES], PathNodesNum = 0; // Start & End Nodes for paths - generated at init - Always use newest GPS.dat to have enough 1-connection nodes & well spread NPCs!
+// I'll gather such nodes until we have about 1200 or even more.
+new IgnoredPathNodes[] = // Nodes to ignore for start/end nodes - mostly too many at one spot except stated otherwise
+{
+	// Parking LS (too many)
+	9522,9513,9503,9511,9502,
+	// Ungerground Parking LS
+	3845,3844,3852,3857,
+	// Underground Parking SF - Some left over ;)
+	21198,21143,21148,21205,21149,21204,21206,21150,21172,21187,21112,21129,21115,21109,
+	// Underground Parking LV 
+	27155,27158,27165,27164,27156,
+	// South LV Houses
+	19386,19388,19392,19393,19398,19277,19920,19984,19991,19985,19937,19768,
+	19977,19971,23291,19264,19343,23624,19263,19359,19350,19344,19349,19271,
+	// More stupid LV nodes
+	24559,24555,24551,
+	// Chiliad - Completely ignored
+	1895,2214,2232
+};
 
 new RandomVehicleList[212], VehicleListNum = 0;
 
@@ -332,28 +353,24 @@ Drivers_Init()
 	updtimer = SetTimer("PrintDriverUpdate", INFO_DELAY*1000, 1);
 	#endif
 	
-	// ---------------- LOAD FILES
+	// ---------------- GENERATE START & END NODES
 	
-	new File:FIn = fopen("ValidGPSNodes.txt", io_read), tmp[10];
-	
-	if(FIn)
+	for(new i = 0; i < MAX_NODES && PathNodesNum < MAX_PATH_NODES; i ++)
 	{
-	    while(fread(FIn, tmp) && RandomNodesNum < MAX_RANDOM_NODES)
+	    if(IsNodeInPathFinder(i) != 1) continue;
+	    
+	    if(GetConnectedNodes(i) != 1) continue;
+	    
+	    new bool:ignore = false;
+	    for(new j = 0; j < sizeof(IgnoredPathNodes); j ++) if(i == IgnoredPathNodes[j])
 	    {
-			new nodeid = strval(tmp);
-			
-			if(nodeid >= 0 && nodeid < MAX_NODES && NodeExists(nodeid))
-			{
-			    RandomNodes[RandomNodesNum] = nodeid;
-			    RandomNodesNum ++;
-			}
+	        ignore = true;
+	        break;
 	    }
-	    fclose(FIn);
-	}
-	else
-	{
-	    print("[DRIVERS] Error: No Random Nodes found!");
-	    return 1;
+	    
+	    if(ignore) continue;
+	    
+	    PathNodes[PathNodesNum ++] = i;
 	}
 
 	// ---------------- CONNECT NPCS & stuff
@@ -398,18 +415,17 @@ Drivers_Init()
 			break;
 		}
 
-		new startnode = GetRandomNode(), endnode = GetRandomNode();
+		new startnode = GetPathNode(), endnode = GetPathNode(), Float:dist;
 
-		while(GetDistanceBetweenNodes(startnode, endnode) < ROUTE_MIN_DIST)
+		do
 		{
-		    endnode = GetRandomNode();
+		    endnode = GetPathNode();
+			dist = GetDistanceBetweenNodes(startnode, endnode);
 		}
+		while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 
-		new Float:X, Float:Y, Float:Z, Float:mZ;
+		new Float:X, Float:Y, Float:Z;
 		GetNodePos(startnode, X, Y, Z);
-		CA_FindZ_For2DCoord(X, Y, mZ);
-
-		if(mZ - Z < 2.0) Z = mZ;
 
 		new vmodel, colors[2], skinid;
 
@@ -482,7 +498,7 @@ Drivers_Init()
 		pubCalculatePath(i, startnode, endnode);
 	}
 
-	printf("\n\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d\n   Number of random nodes: %d\n\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, RandomNodesNum);
+	printf("\n\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d\n   Number of random nodes: %d/%d\n\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, PathNodesNum, MAX_PATH_NODES);
 	
 	print("   Initial Calculations started, please wait a moment to finish ...");
 	
@@ -931,12 +947,14 @@ public ResetTaxi(driverid, calcdelay)
     FCNPC_GetPosition(Drivers[driverid][nNPCID], X, Y, Z);
 
     new startnode = NearestNodeFromPoint(X, Y, Z);
-    new endnode = -1;
+    new endnode = -1, Float:dist;
 
     do
-    {
-		endnode = GetRandomNode();
-    } while(GetDistanceBetweenNodes(startnode, endnode) < ROUTE_MIN_DIST);
+	{
+	    endnode = GetPathNode();
+		dist = GetDistanceBetweenNodes(startnode, endnode);
+	}
+	while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 
 	if(calcdelay > 0) SetTimerEx("pubCalculatePath", 2000, 0, "ddd", driverid, startnode, endnode);
 	else pubCalculatePath(driverid, startnode, endnode);
@@ -994,7 +1012,11 @@ PrintDriverUpdate()
 		
 		if(!Drivers[i][nUsed] || !IsPlayerNPC(Drivers[i][nNPCID])) continue;
 		
-		if(curtick - Drivers[i][nLT] > 60000) idlenpcs ++;
+		if(curtick - Drivers[i][nLT] > 60000)
+		{
+		    printf("Driver %d idle!", i);
+			idlenpcs ++;
+		}
 	}
 
 	new Float:avgcalctime = 1.0*avgcalctimes[0];
@@ -1011,7 +1033,7 @@ PrintDriverUpdate()
 	rtm = (rtms / 60000) % 60;
 	rth = rtms / (1000*60*60);
 
-	printf("\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d, Idle NPCs: %d\n   Number of random nodes: %d\n   MaxPathLen: %d/%d, Uptime: %02d:%02d:%02d\n -  -  -  Avg. calc. time: %.02fms, Avg. Server Tick: %.02f\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, idlenpcs, RandomNodesNum, MaxPathLen, MAX_PATH_LEN, rth, rtm, rts, avgcalctime, avgtick);
+	printf("\n   Total Drivers: %d, Random Drivers: %d, Taxi Drivers: %d, Cops: %d\n   maxnpc: %d, Other NPCs: %d, Idle NPCs: %d\n   MaxPathLen: %d/%d, Uptime: %02d:%02d:%02d\n -  -  -  Avg. calc. time: %.02fms, Avg. Server Tick: %.02f\n", DRIVER_AMOUNT, (DRIVER_AMOUNT - DRIVER_TAXIS - DRIVER_COPS), DRIVER_TAXIS, DRIVER_COPS, maxnpc, othernpcs, idlenpcs, MaxPathLen, MAX_PATH_LEN, rth, rtm, rts, avgcalctime, avgtick);
 	return 1;
 }
 
@@ -1055,7 +1077,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		DriverPath[driverid][0][1] = NodePosY[0];
 		DriverPath[driverid][0][2] = NodePosZ[0];
 
-		DriverPathLen[driverid] = 0;
+		DriverPathLen[driverid] = 1;
 
 		for(new i = 1; arrayid < amount_of_nodes && i < MAX_PATH_LEN; i ++)
 		{
@@ -1166,7 +1188,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		    DriverPath[driverid][i][1] = newpath[i][1];
 		}
 		
-		Drivers[driverid][nCurNode] = 1;
+		Drivers[driverid][nCurNode] = 0;
 		Drivers[driverid][nState] = DRIVER_STATE_DRIVE;
 		Drivers[driverid][nSpeed] = (MIN_SPEED + MAX_SPEED) / 3.0;
 		Drivers[driverid][nDistance] = distance;
@@ -1256,14 +1278,16 @@ public FCNPC_OnReachDestination(npcid)
 		        FCNPC_GetPosition(npcid, X, Y, Z);
 		        
 		        new startnode = NearestNodeFromPoint(X, Y, Z);
-		        new endnode = -1;
+		        new endnode = -1, Float:dist;
 		        
 		        do
-		        {
-					endnode = GetRandomNode();
-		        } while(GetDistanceBetweenNodes(startnode, endnode) < ROUTE_MIN_DIST);
+				{
+				    endnode = GetPathNode();
+					dist = GetDistanceBetweenNodes(startnode, endnode);
+				}
+				while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 		        
-		        SetTimerEx("pubCalculatePath", 300, 0, "ddd", driverid, startnode, endnode);
+		        SetTimerEx("pubCalculatePath", 10000 + random(10000), 0, "ddd", driverid, startnode, endnode);
 		    }
 		    else if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty])
 		    {
@@ -1477,11 +1501,11 @@ stock strtok(const string[], &index) // Please don't complain about this - it wi
 
 stock HidePlayerDialog(playerid) return ShowPlayerDialog(playerid,-1,0," "," "," "," ");
 
-GetRandomNode()
+GetPathNode()
 {
-	if(RandomNodesNum < 1 || RandomNodesNum >= MAX_RANDOM_NODES) return -1;
+	if(PathNodesNum < 1 || PathNodesNum >= MAX_PATH_NODES) return -1;
 	
-	return RandomNodes[random(RandomNodesNum)];
+	return PathNodes[random(PathNodesNum)];
 }
 
 forward Float:Get2DAngleOf3Points(Float:x1, Float:y1, Float:x2, Float:y2, Float:x3, Float:y3);
