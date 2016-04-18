@@ -27,6 +27,7 @@ Feel free to use and modify as you wish, but don't re-release this without our p
 Latest Changenotes:
 [v1.2.1]
 
+- Support for newest (1.0.5) FCNPC version
 - Added Cops (count as civilains)
    Cops turn on the sirens sometimes to annoy their surroundings
 - Added Skin Arrays for different types (Civ, Cops, Taxis)
