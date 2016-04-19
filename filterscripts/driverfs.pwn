@@ -139,7 +139,66 @@ Latest Changenotes:
 
 #pragma dynamic					(64*1000) // Needs to be higher for longer paths/more npcs!
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------- DEFINE WHERE NPCS SPAWN/GOTO - If you narrow it down to a small area lower the NPC Amount proportionally!
+
+#define MAP_ENABLE_LS           (true)
+#define MAP_ENABLE_COUNTY       (true)
+#define MAP_ENABLE_SF           (true)
+#define MAP_ENABLE_LV           (true)
+#define MAP_ENABLE_LV_DESERT    (true)
+
+#if MAP_ENABLE_LS != true && MAP_ENABLE_SF != true && MAP_ENABLE_LV != true && MAP_ENABLE_LV_DESERT != true && MAP_ENABLE_COUNTY != true
+#error You must at least enable one area (MAP_ENABLE_* defines)
+#endif
+
+#if MAP_ENABLE_LS != true || MAP_ENABLE_SF != true || MAP_ENABLE_LV != true || MAP_ENABLE_LV_DESERT != true || MAP_ENABLE_COUNTY != true
+#if MAP_ENABLE_LS != true
+new Float:LSCoords[4][4] = // maxx, maxy, minx, miny - Created with GTA Zone Editor by zeppelin
+{
+	{2992.19, -1093.75, 70.94, -2851.56},
+	{2984.38, -875.00, 257.81, -1093.75},
+	{1601.56, -687.50, 750.00, -875.00},
+	{1601.56, -585.94, 882.81, -695.31}
+};
+#endif
+#if MAP_ENABLE_SF != true
+new Float:SFCoords[4][4] = // maxx, maxy, minx, miny
+{
+	{-1421.88, 1562.50, -2898.44, -710.94},
+	{-1171.88, 617.19, -1453.13, -695.31},
+	{-1023.44, 54.69, -1195.31, -375.00},
+	{-1867.19, -703.13, -2265.63, -1062.50}
+};
+#endif
+#if MAP_ENABLE_LV != true
+new Float:LVCoords[4] = // maxx, maxy, minx, miny
+{3015.63, 3031.25, 859.38, 625.00};
+#endif
+#if MAP_ENABLE_LV_DESERT != true
+new Float:LVDesertCoords[4][4] = // maxx, maxy, minx, miny
+{
+	{859.38, 3000.00, -875.00, 523.44},
+	{-875.00, 3007.81, -1320.31, 875.00},
+	{-1304.69, 3015.63, -2117.19, 1671.88},
+	{-2117.19, 3007.81, -2976.56, 2117.19} // Bayside!
+};
+#endif
+#if MAP_ENABLE_COUNTY != true
+new Float:CountyCoords[8][4] = // maxx, maxy, minx, miny
+{
+	{46.88, -1085.94, -2945.31, -2968.75},
+	{257.81, -695.31, -1898.44, -1085.94},
+	{250.00, -375.00, -1187.50, -695.31},
+	{250.00, 335.94, -1015.63, -375.00},
+	{765.63, 445.31, 234.38, -929.69},
+	{882.81, 453.13, 765.63, -695.31},
+	{2968.75, 593.75, 882.81, -585.94},
+	{2976.56, -570.31, 1593.75, -875.00}
+};
+#endif
+#endif
+
+// ----------------------------------------------------------------------------- Arrays, Vars etc
 
 enum E_DRIVERS
 {
@@ -356,6 +415,8 @@ Drivers_Init()
 	
 	// ---------------- GENERATE START & END NODES
 	
+	new Float:X, Float:Y, Float:Z;
+	
 	for(new i = 0; i < MAX_NODES && PathNodesNum < MAX_PATH_NODES; i ++)
 	{
 	    if(IsNodeInPathFinder(i) != 1) continue;
@@ -371,8 +432,55 @@ Drivers_Init()
 	    
 	    if(ignore) continue;
 	    
+	    #if MAP_ENABLE_LS != true || MAP_ENABLE_SF != true || MAP_ENABLE_LV != true || MAP_ENABLE_LV_DESERT != true || MAP_ENABLE_COUNTY != true // Check for disabled zones (if any)
+	    
+		    GetNodePos(i, X, Y, Z);
+
+		    #if MAP_ENABLE_LS != true
+			    for(new j = 0; j < sizeof(LSCoords); j ++) if(X < LSCoords[j][0] && Y < LSCoords[j][1] && X > LSCoords[j][2] && Y > LSCoords[j][3])
+			    {
+			        ignore = true;
+			        break;
+			    }
+			    if(ignore) continue;
+		    #endif
+
+		    #if MAP_ENABLE_SF != true
+			    for(new j = 0; j < sizeof(SFCoords); j ++) if(X < SFCoords[j][0] && Y < SFCoords[j][1] && X > SFCoords[j][2] && Y > SFCoords[j][3])
+			    {
+			        ignore = true;
+			        break;
+			    }
+			    if(ignore) continue;
+		    #endif
+
+		    #if MAP_ENABLE_LV != true
+			    if(X < LVCoords[0] && Y < LVCoords[1] && X > LVCoords[2] && Y > LVCoords[3]) continue;
+		    #endif
+
+		    #if MAP_ENABLE_LV_DESERT != true
+			    for(new j = 0; j < sizeof(LVDesertCoords); j ++) if(X < LVDesertCoords[j][0] && Y < LVDesertCoords[j][1] && X > LVDesertCoords[j][2] && Y > LVDesertCoords[j][3])
+			    {
+			        ignore = true;
+			        break;
+			    }
+			    if(ignore) continue;
+		    #endif
+
+		    #if MAP_ENABLE_COUNTY != true
+			    for(new j = 0; j < sizeof(CountyCoords); j ++) if(X < CountyCoords[j][0] && Y < CountyCoords[j][1] && X > CountyCoords[j][2] && Y > CountyCoords[j][3])
+			    {
+			        ignore = true;
+			        break;
+			    }
+			    if(ignore) continue;
+		    #endif
+	    #endif
+	    
 	    PathNodes[PathNodesNum ++] = i;
 	}
+	
+	if(PathNodesNum < 30) print("DRIVER WARNING: Insufficient amount of parking lots - Use newest GPS.dat or enable more areas!");
 
 	// ---------------- CONNECT NPCS & stuff
 
@@ -425,7 +533,6 @@ Drivers_Init()
 		}
 		while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 
-		new Float:X, Float:Y, Float:Z;
 		GetNodePos(startnode, X, Y, Z);
 
 		new vmodel, colors[2], skinid;
