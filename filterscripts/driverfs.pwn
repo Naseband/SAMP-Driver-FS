@@ -26,6 +26,11 @@ Feel free to use and modify as you wish, but don't re-release this without our p
 
 Latest Changenotes:
 
+[v1.2.4]
+
+- Removed dependancy on QuaternionStuff
+- Now uses Nero_3D's rotations.inc to calculate Vehicle Rotations
+
 [v1.2.3]
 
 - Support for newest FCNPC Version (1.7.6)
@@ -76,9 +81,11 @@ TO DO:
 
 *///----------------------------------------------------------------------------
 
+
 // -----------------------------------------------------------------------------
 
 #define SCRIPT_NAME             "driverfs" // The Scriptname (by default driverfs.pwn)
+#define FILTERSCRIPT
 
 #include <a_samp>
 #undef MAX_PLAYERS
@@ -87,14 +94,10 @@ TO DO:
 #undef MAX_NODES
 #include <GPS>
 #include <ColAndreas>
-#include <QuaternionStuff>
-
-//#include <streamer>
+#include <rotations>
+#include <zcmd>
 
 // ----------------------------------------------------------------------------- CONFIG
-
-// Driver Streaming:            The drivers get "streamed" whether a player is around or not. This was relying on streamer areas before,
-//									but I changed it to depend on the NPC Streaming mechanism
 
 #define NPC_NAMES           	"NPCDriver_%d" // %d will be replaced by the Drivers's ID (not NPC ID!)
 
@@ -105,12 +108,12 @@ TO DO:
 #define MAP_ZONES				(false) // Creates gang zones for every driver as replacement for a map marker (all npcs are always visible in ESC->Map)
 #define SEND_DEATH_MESSAGE		(false) // Sends death message for killed NPC in chat (change in OnPlayerDeath to fit your Server)
 
-#define DRIVER_AMOUNT			(350)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount (300/20/20 = 300 NPCS of which are 20 Taxis, 20 Cops and 260 Normies)
-#define DRIVER_TAXIS			(70)
-#define DRIVER_COPS             (55)
+#define DRIVER_AMOUNT			(150)  	// TOTAL NPC COUNT - Different driver types are part of the overall driver amount (300/20/20 = 300 NPCS of which are 20 Taxis, 20 Cops and 260 Normies)
+#define DRIVER_TAXIS			(50)
+#define DRIVER_COPS             (35)
 
-#define MAX_NODE_DIST			(15.0)
-#define MIN_NODE_DIST			(2.2) // Small changes here usually make a big difference. Do not go below 1.5.
+#define MAX_NODE_DIST			(18.0)
+#define MIN_NODE_DIST			(2.5) // Small changes here usually make a big difference. Do not go below 1.5.
 #define SIDE_DIST				(2.02) // Distance to the center of the road, 2m is usually the best (unfortunately the actual data of road sizes hasn't been included with the GPS Plugin)
 #define SMOOTH_W_DATA           (0.6) // Smoothing values, DATA - data weight, SMOOTH - smooth weight, should be bewtween 0.1 and 1.0
 #define SMOOTH_W_SMOOTH         (0.2)
@@ -124,7 +127,7 @@ TO DO:
 #define JAM_DIST               	(15.0) // Distance between 2 Drivers to make them slow down
 #define JAM_ANGLE               (25) // INT! Max angle distance between 2 Drivers to make them slow down
 
-#define MAX_PATH_LEN    		(2200)
+#define MAX_PATH_LEN    		(1350)
 
 #define MAX_TAXI_DIST           (3000.0) // Max Distance to a taxi to respond
 #define TAXI_RANGE				(35.0) // Max Range to closest nodes (Upon calling)
@@ -258,6 +261,8 @@ new NPCDriverID[MAX_PLAYERS] = {-1, ...};
 new Float:DriverPath[DRIVER_AMOUNT][MAX_PATH_LEN][3];
 new DriverPathLen[DRIVER_AMOUNT];
 
+new PlayerEnterDriver[MAX_PLAYERS] = {-1, ...};
+
 new Float:VehicleZOffsets[] = // Contains normal 4wheel vehicles, including Quad, Police Cars and Police Rancher, since the angle calculations also some bikes
 {
 	1.0982/*(400)*/,0.7849/*(401)*/,0.8371/*(402)*/,-1000.0/*(403)*/,0.7416/*(404)*/,0.8802/*(405)*/,-1000.0/*(406)*/,-1000.0/*(407)*/,-1000.0/*(408)*/,0.7901/*(409)*/,
@@ -386,6 +391,14 @@ new bool:Initialized = false;
 new InitialCalculations = 0, InitialCalculationStart;
 
 new NumRouteCalcs = 0, ExitPlayerID = -1; // Important for smooth FS unloading
+
+// -----------------------------------------------------------------------------
+
+forward Float:smooth_path(Float:path[][2], len = sizeof path);
+forward Float:OffsetPath(Float:path[MAX_PATH_LEN][2], len, Float:d);
+forward Float:Get2DAngleOf3Points(Float:x1, Float:y1, Float:x2, Float:y2, Float:x3, Float:y3);
+forward Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist);
+forward Float:floatangledistdir(Float:firstAngle, Float:secondAngle); 
 
 // -----------------------------------------------------------------------------
 
@@ -815,6 +828,21 @@ public FCNPC_OnSpawn(npcid)
 
 // ----------------------------------------------------------------------------- 
 
+public FCNPC_OnStreamIn(npcid, forplayerid)
+{
+	new driverid = GetDriverID(npcid);
+
+	if(PlayerEnterDriver[forplayerid] != -1 && PlayerEnterDriver[forplayerid] == driverid)
+	{
+		PutPlayerInVehicle(forplayerid, Drivers[driverid][nVehicle], 1);
+		PlayerEnterDriver[forplayerid] = -1;
+	}
+
+	return 1;
+}
+
+// ----------------------------------------------------------------------------- 
+
 public FCNPC_OnDeath(npcid, killerid, weaponid)
 {
     if(!Initialized) return 1;
@@ -883,7 +911,11 @@ public OnPlayerConnect(playerid)
 {
 	if(!Initialized) return 1;
 	
-	if(!IsPlayerNPC(playerid)) LastTaxiInteraction[playerid] = GetTickCount() - TAXI_COOLDOWN*1000;
+	if(!IsPlayerNPC(playerid))
+	{
+		LastTaxiInteraction[playerid] = GetTickCount() - TAXI_COOLDOWN*1000;
+		PlayerEnterDriver[playerid] = -1;
+	}
 	
 	return 1;
 }
@@ -897,181 +929,161 @@ public OnPlayerDisconnect(playerid)
 
 // ----------------------------------------------------------------------------- 
 
+COMMAND:ds(playerid, params[])
+{
+	if(!Initialized || !IsPlayerAdmin(playerid)) return 0;
+
+	new id = -1;
+
+	if(!isnull(params) && strlen(params) < 8)
+	{
+		if(params[0] == 'r') id = random(DRIVER_AMOUNT);
+		else
+		{
+			id = strval(params);
+
+			if(id < 0 || id >= DRIVER_AMOUNT) id = -1;
+		}
+	}
+
+	if(id == -1) return SendClientMessage(playerid, -1, "Invalid Driver ID");
+
+	new Float:x, Float:y, Float:z;
+	FCNPC_GetPosition(Drivers[id][nNPCID], x, y, z);
+
+	if(FCNPC_IsStreamedIn(Drivers[id][nNPCID], playerid)) PutPlayerInVehicle(playerid, Drivers[id][nVehicle], 1);
+	else
+	{
+		SetPlayerPos(playerid, x, y, z);
+		PlayerEnterDriver[playerid] = id;
+	}
+
+	return 1;
+}
+
+COMMAND:dfs_cmds(playerid, params[])
+{
+	if(!Initialized) return 0;
+
+    SendClientMessage(playerid, -1, "  ");
+    SendClientMessage(playerid, -1, "{99FF00}Driver FS by NaS & AIped (c) 2015-2017");
+    
+    if(IsPlayerAdmin(playerid))
+    {
+	    SendClientMessage(playerid, -1, "{FF9900} Admin Commands - []: required, (): optional");
+	    SendClientMessage(playerid, -1, "  /ds [ID] (seat) - Take a seat in the specified Driver's Vehicle.");
+	    SendClientMessage(playerid, -1, "  /dfs_info - Prints Driver Updates.");
+	    SendClientMessage(playerid, -1, "  /dfs_exit - Slowly kicks all NPCs and stops the Script. Unloading the actual FS crashes! :(");
+    }
+    
+    SendClientMessage(playerid, -1, "{FF9900} Player Commands");
+	SendClientMessage(playerid, -1, "  /Taxi - Calls a Taxi to your location.");
+
+    return 1;
+}
+
+COMMAND:dfs_help(playerid, params[])
+{
+	return cmd_dfs_cmds(playerid, params);
+}
+
+COMMAND:dfs_exit(playerid, params[])
+{
+	if(!Initialized || !IsPlayerAdmin(playerid)) return 0;
+
+    if(NumRouteCalcs == 0) SendClientMessage(playerid, -1, "Unloading Driver FS ...");
+    else
+	{
+		new text[128];
+		format(text, sizeof(text), "There are %d Path Calculations left. The Script will unload once they are completed.", NumRouteCalcs);
+    	SendClientMessage(playerid, -1, text);
+    }
+    
+    ExitPlayerID = playerid;
+    
+	Drivers_Exit(0, 0);
+
+    return 1;
+}
+
+COMMAND:dfs_info(playerid, params[])
+{
+	if(!Initialized || !IsPlayerAdmin(playerid)) return 0;
+
+	PrintDriverUpdate();
+
+	return 1;
+}
+
+COMMAND:taxi(playerid, params[])
+{
+	if(!Initialized) return 0;
+
+    if(Taxi[playerid] != -1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, it seems like you have already ordered a taxi."), 1;
+    
+    if(GetTickCount() - LastTaxiInteraction[playerid] < TAXI_COOLDOWN*1000) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have any available cabs right now."), 1;
+
+	new taxi = -1, Float:tdist = MAX_TAXI_DIST, Float:X, Float:Y, Float:Z, destnode = -1;
+	GetPlayerPos(playerid, X, Y, Z);
+	
+	destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE);
+    if(IsNodeInPathFinder(destnode) < 1) destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE, destnode);
+    if(IsNodeInPathFinder(destnode) < 1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have your location on our GPS."), 1;
+	
+	for(new i = 0; i < DRIVER_TAXIS; i ++)
+	{
+	    if(!Drivers[i][nUsed] || Drivers[i][nOnDuty] || !IsPlayerNPC(Drivers[i][nNPCID])) continue;
+	    
+	    if(Drivers[i][nState] != DRIVER_STATE_DRIVE) continue;
+	    
+	    new Float:dist = GetPlayerDistanceFromPoint(Drivers[i][nNPCID], X, Y, Z);
+	    
+	    if(dist < tdist)
+	    {
+	        taxi = i;
+	        tdist = dist;
+	    }
+	}
+
+    if(taxi == -1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have an available cab near you."), 1;
+
+    new startnode = -1, npcid = Drivers[taxi][nNPCID];
+
+	FCNPC_GetPosition(npcid, X, Y, Z);
+	startnode = NearestNodeFromPoint(X, Y, Z, 100.0);
+	if(IsNodeInPathFinder(startnode) < 1) startnode = NearestNodeFromPoint(X, Y, Z, 100.0, startnode);
+	if(IsNodeInPathFinder(startnode) < 1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have an available cab near you."), 1;
+
+	Drivers[taxi][nState] = DRIVER_STATE_NONE;
+	if(FCNPC_IsMoving(npcid)) FCNPC_Stop(npcid);
+	
+	Drivers[taxi][nOnDuty] = true;
+	Drivers[taxi][nPlayer] = playerid;
+
+	if(tdist < TAXI_RANGE)
+	{
+		TaxiState[playerid] = TAXI_STATE_WAIT1;
+		SetVehicleParamsForPlayer(Drivers[taxi][nVehicle], playerid, 1, 0);
+		Drivers[taxi][nLastStart] = Drivers[taxi][nLastDest];
+		Drivers[taxi][nLastDest] = startnode;
+		
+        SendClientMessage(playerid, -1, "[Taxi Service]: {009900}Get in. We got a driver right around the corner!");
+	}
+	else
+	{
+	    pubCalculatePath(taxi, startnode, destnode);
+	    TaxiState[playerid] = TAXI_STATE_DRIVE1;
+	}
+	
+	Taxi[playerid] = taxi;
+
+    return 1;
+}
+
 public OnPlayerCommandText(playerid, cmdtext[])
 {
 	if(!Initialized) return 0;
 
-	if(IsPlayerAdmin(playerid))
-	{
-	    new cmd[128], idx;
-		cmd = strtok(cmdtext, idx);
-	
-		if(strcmp(cmd, "/dfs_exit", true) == 0) // Exits the script, should be used instead of unloadfs (unloadfs crashes the server)
-		{
-		    if(NumRouteCalcs == 0) SendClientMessage(playerid, -1, "Unloading Driver FS ...");
-		    else
-			{
-				format(cmd, sizeof(cmd), "There are %d Path Calculations left. The Script will unload once they are completed.", NumRouteCalcs);
-		    	SendClientMessage(playerid, -1, cmd);
-		    }
-		    
-		    ExitPlayerID = playerid;
-		    
-			Drivers_Exit(0, 0);
-		    return 1;
-		}
-
-		if(strcmp(cmd, "/ds", true) == 0) // /ds [id] [seat] - Sit in Driver's Vehicle (By ID)
-		{
-		    cmd = strtok(cmdtext, idx);
-		    
-		    if(strlen(cmd) < 1 || strlen(cmd) > 6) return 1;
-
-			new slot = strval(cmd);
-
-			if(slot < 0 || slot >= DRIVER_AMOUNT) return 1;
-
-			cmd = strtok(cmdtext, idx);
-
-			if(strlen(cmd) < 1 || strlen(cmd) > 6) return 1;
-
-			new seat = strval(cmd);
-
-			if(seat < 1 || seat > 3) seat = 1;
-
-		    PutPlayerInVehicle(playerid, Drivers[slot][nVehicle], seat);
-			return 1;
-		}
-		
-		if(strcmp(cmd, "/dsm", true) == 0) // /dsm [model] [num] [seat] - Sit in Driver's Vehicle (By Model)
-		{
-		    cmd = strtok(cmdtext, idx);
-		    
-		    if(strlen(cmd) < 1 || strlen(cmd) > 6) return 1;
-			
-			new model = strval(cmd);
-			
-			if(model < 400 || model > 611) return 1;
-			
-			
-			cmd = strtok(cmdtext, idx);
-			
-			new num;
-			
-			if(strlen(cmd) < 1 || strlen(cmd) > 6) num = 1;
-			else num = strval(cmd);
-			
-			if(num < 1 || num > DRIVER_AMOUNT) num = 1;
-			
-			
-			cmd = strtok(cmdtext, idx);
-
-			new seat;
-
-			if(strlen(cmd) < 1 || strlen(cmd) > 6) seat = 1;
-			else seat = strval(cmd);
-
-			if(seat < 1 || seat > 3) seat = 1;
-			
-			
-			for(new i = 0; i < DRIVER_AMOUNT; i ++) if(Drivers[i][nUsed] && Drivers[i][nVehicleModel] == model)
-			{
-			    if(--num != 0) continue;
-			    
-			    PutPlayerInVehicle(playerid, Drivers[i][nVehicle], seat);
-		    }
-			return 1;
-		}
-
-		if(strcmp(cmdtext, "/dfs_info", true) == 0)
-		{
-		    PrintDriverUpdate();
-		    return 1;
-		}
-	}
-	
-	if(strcmp(cmdtext, "/dfs_cmd", true) == 0 || strcmp(cmdtext, "/dfs_cmds", true) == 0 || strcmp(cmdtext, "/dfs_help", true) == 0)
-	{
-	    SendClientMessage(playerid, -1, "  ");
-	    SendClientMessage(playerid, -1, "{99FF00}Driver FS by NaS & AIped (c) 2015-2017");
-	    
-	    if(IsPlayerAdmin(playerid))
-	    {
-		    SendClientMessage(playerid, -1, "{FF9900} Admin Commands - []: required, (): optional");
-		    SendClientMessage(playerid, -1, "  /ds [ID] (seat) - Take a seat in the specified Driver's Vehicle.");
-		    SendClientMessage(playerid, -1, "  /dsm [model] (num) (seat) - Take a seat in the specified Vehicle Model driven by a Driver.");
-		    SendClientMessage(playerid, -1, "  /dfs_info - Prints Driver Updates.");
-		    SendClientMessage(playerid, -1, "  /dfs_exit - Slowly kicks all NPCs and stops the Script. Unloading the actual FS crashes! :(");
-	    }
-	    
-	    SendClientMessage(playerid, -1, "{FF9900} Player Commands");
-		SendClientMessage(playerid, -1, "  /Taxi - Calls a Taxi to your location.");
-	    return 1;
-	}
-	
-	if(strcmp(cmdtext, "/taxi", true) == 0)
-	{
-	    if(Taxi[playerid] != -1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, it seems like you have already ordered a taxi."), 1;
-	    
-	    if(GetTickCount() - LastTaxiInteraction[playerid] < TAXI_COOLDOWN*1000) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have any available cabs right now."), 1;
-
-		new taxi = -1, Float:tdist = MAX_TAXI_DIST, Float:X, Float:Y, Float:Z, destnode = -1;
-		GetPlayerPos(playerid, X, Y, Z);
-		
-		destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE);
-	    if(IsNodeInPathFinder(destnode) < 1) destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE, destnode);
-	    if(IsNodeInPathFinder(destnode) < 1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have your location on our GPS."), 1;
-		
-		for(new i = 0; i < DRIVER_TAXIS; i ++)
-		{
-		    if(!Drivers[i][nUsed] || Drivers[i][nOnDuty] || !IsPlayerNPC(Drivers[i][nNPCID])) continue;
-		    
-		    if(Drivers[i][nState] != DRIVER_STATE_DRIVE) continue;
-		    
-		    new Float:dist = GetPlayerDistanceFromPoint(Drivers[i][nNPCID], X, Y, Z);
-		    
-		    if(dist < tdist)
-		    {
-		        taxi = i;
-		        tdist = dist;
-		    }
-		}
-
-	    if(taxi == -1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have an available cab near you."), 1;
-
-	    new startnode = -1, npcid = Drivers[taxi][nNPCID];
-
-		FCNPC_GetPosition(npcid, X, Y, Z);
-    	startnode = NearestNodeFromPoint(X, Y, Z, 100.0);
-    	if(IsNodeInPathFinder(startnode) < 1) startnode = NearestNodeFromPoint(X, Y, Z, 100.0, startnode);
-		if(IsNodeInPathFinder(startnode) < 1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have an available cab near you."), 1;
-
-		Drivers[taxi][nState] = DRIVER_STATE_NONE;
-		if(FCNPC_IsMoving(npcid)) FCNPC_Stop(npcid);
-		
-		Drivers[taxi][nOnDuty] = true;
-		Drivers[taxi][nPlayer] = playerid;
-
-		if(tdist < TAXI_RANGE)
-		{
-			TaxiState[playerid] = TAXI_STATE_WAIT1;
-			SetVehicleParamsForPlayer(Drivers[taxi][nVehicle], playerid, 1, 0);
-			Drivers[taxi][nLastStart] = Drivers[taxi][nLastDest];
-			Drivers[taxi][nLastDest] = startnode;
-			
-            SendClientMessage(playerid, -1, "[Taxi Service]: {009900}Get in. We got a driver right around the corner!");
-		}
-		else
-		{
-		    pubCalculatePath(taxi, startnode, destnode);
-		    TaxiState[playerid] = TAXI_STATE_DRIVE1;
-		}
-		
-		Taxi[playerid] = taxi;
-
-	    return 1;
-	}
-	
 	return 0;
 }
 
@@ -1822,75 +1834,63 @@ public FCNPC_OnReachDestination(npcid)
 		FCNPC_GetPosition(npcid, X, Y, Z);
 		
 		#if DEBUG_BUBBLE == true
-		new bool:complex;
+		new bool:complex, Float:z_angle;
 		#endif
 		
-		if(cnode > 1 && cnode < DriverPathLen[driverid]-1)
+		if(cnode > 0 && cnode < DriverPathLen[driverid]-1)
 		{
-		    new Float:Adif = floatangledistdir(-atan2(DriverPath[driverid][cnode][0]-DriverPath[driverid][cnode-1][0], DriverPath[driverid][cnode][1]-DriverPath[driverid][cnode-1][1]), -atan2(DriverPath[driverid][cnode+1][0]-DriverPath[driverid][cnode][0], DriverPath[driverid][cnode+1][1]-DriverPath[driverid][cnode][1]));
+			new Float:z_angle1, Float:z_angle2, Float:waste, Float:surface_rx, Float:surface_ry;
 
-		    FCNPC_SetKeys(npcid, 0, (Adif <= -STEER_ANGLE ? 128 : (Adif >= STEER_ANGLE ? -128 : 0)), 0);
+			GetRZFromVectorXY(DriverPath[driverid][cnode][0] - DriverPath[driverid][cnode - 1][0], DriverPath[driverid][cnode][1] - DriverPath[driverid][cnode - 1][1], z_angle1);
+			GetRZFromVectorXY(DriverPath[driverid][cnode + 1][0] - DriverPath[driverid][cnode][0], DriverPath[driverid][cnode + 1][1] - DriverPath[driverid][cnode][1], z_angle2);
+
+			#if DEBUG_BUBBLE == true
+			z_angle = z_angle1;
+			#endif
+
+			new Float:angle_dif = floatangledistdir(z_angle1, z_angle2);
+
+		    FCNPC_SetKeys(npcid, 0, (angle_dif <= -STEER_ANGLE ? 128 : (angle_dif >= STEER_ANGLE ? -128 : 0)), 0);
 		    
-			if(Drivers[driverid][nVehicleIsBike]) // Complex Bike
-			{
-				if(Adif > -1.5 && Adif < 1.5 && Drivers[driverid][nVehicleLastLean]  > -1.5 && Drivers[driverid][nVehicleLastLean] < 1.5) goto ORD_NormalRot;
-				
-				GetXYInFrontOfPoint(0.0, 0.0, Adif - 90.0, Qx, Qy, 0.75);
+		    CA_RayCastLineAngle(X, Y, Z + 0.75, X, Y, Z - 3.0, waste, waste, waste, surface_rx, surface_ry, waste);
 
-				Adif = Adif / 45.0;
+		    if(Drivers[driverid][nVehicleIsBike])
+		    {
+		    	angle_dif = -angle_dif / 15.0;
 
-				if(Adif < -1.0) Adif = -1.0;
-				if(Adif > 1.0) Adif = 1.0;
+		    	if(angle_dif < -1.0) angle_dif = -1.0;
+		    	else if(angle_dif > 1.0) angle_dif = 1.0;
 
-				if((Adif < 0.0 && Drivers[driverid][nVehicleLastLean] < 0.0) || (Adif > 0.0 && Drivers[driverid][nVehicleLastLean] > 0.0)) Adif = (Adif + Drivers[driverid][nVehicleLastLean] + Drivers[driverid][nVehicleLastLean]) / 3.0;
+		    	angle_dif = (angle_dif + Drivers[driverid][nVehicleLastLean] + Drivers[driverid][nVehicleLastLean]) / 3.0;
 
-			    GetQuatRotForVehBetweenCoords3D(X + Qx, Y + Qy, Z + Adif, X - Qx, Y - Qy, Z - Adif,  DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], Qw, Qx, Qy, Qz);
-			    
-			    #if DEBUG_BUBBLE == true
-			    complex = true;
-				#endif
-				
-			    Drivers[driverid][nVehicleLastLean] = Adif;
-			}
-			else // Complex Car
-			{
-			    GetXYInFrontOfPoint(0.0, 0.0, A1 + 90.0, Qx, Qy, 0.5);
-			    
-			    #define X_ROT_TOL  0.25 // Minimum angle (in degrees) for an NPC to actually apply correct rotation
-			    
-			    new Float:fret1[3], Float:fret2[3];
-			    
-			    CA_RayCastLine(X-Qx, Y-Qy, Z + X_ROT_TOL + 0.1, X-Qx, Y-Qy, Z - X_ROT_TOL - 0.1, fret1[0], fret1[1], fret1[2]);
-			    fret1[2] += VehicleZOffsets[Drivers[driverid][nVehicleModel]-400];
-			    if(fret1[2] <= Z - X_ROT_TOL || fret1[2] >= Z + X_ROT_TOL) goto ORD_NormalRot;
-			    
-			    CA_RayCastLine(X+Qx, Y+Qy, Z + X_ROT_TOL + 0.1, X+Qx, Y+Qy, Z - X_ROT_TOL - 0.1, fret2[0], fret2[1], fret2[2]);
-			    fret2[2] += VehicleZOffsets[Drivers[driverid][nVehicleModel]-400];
-			    if(fret2[2] <= Z - X_ROT_TOL || fret2[2] >= Z + X_ROT_TOL || (floatabs(Z - fret1[2]) < 0.01 && floatabs(Z - fret2[2]) < 0.01)) goto ORD_NormalRot; // Too high/no angle or no hit
+		    	Drivers[driverid][nVehicleLastLean] = angle_dif;
 
-				GetQuatRotForVehBetweenCoords3D(fret1[0], fret1[1], fret1[2], fret2[0], fret2[1], fret2[2], DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], Qw, Qx, Qy, Qz);
-				
-				#undef X_ROT_TOL
-				
-				#if DEBUG_BUBBLE == true
-				complex = true;
-				#endif
-			}
+		    	GetRotForSurface(Qw, Qx, Qy, Qz,  surface_rx, surface_ry,  0.0, angle_dif * 30.0, z_angle1);
+		    }
+		    else GetRotForSurface(Qw, Qx, Qy, Qz,  surface_rx, surface_ry,  0.0, 0.0, z_angle1);
 		}
 		else
 		{
 		    FCNPC_SetKeys(npcid, 0, 0, 0);
-		    ORD_NormalRot:
-			GetQuatRotForVehBetweenCoords2D(X, Y, Z, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], Qw, Qx, Qy, Qz);
+
+		    if(cnode > 0)
+		    {
+			    new Float:z_angle1, Float:rx;
+
+			    GetRZFromVectorXY(DriverPath[driverid][cnode][0] - DriverPath[driverid][cnode - 1][0], DriverPath[driverid][cnode][1] - DriverPath[driverid][cnode - 1][1], z_angle1);
+			    GetRXFromVectorZ(DriverPath[driverid][cnode][2] - DriverPath[driverid][cnode - 1][2], rx);
+
+		    	GetRotForSurface(Qw, Qx, Qy, Qz,  0.0, 0.0,  rx, 0.0, z_angle1);
+		    }
+		    else GetRotForSurface(Qw, Qx, Qy, Qz,  0.0, 0.0,  0.0, 0.0, FCNPC_GetAngle(npcid));
 		}
 
-		FCNPC_GoTo(npcid, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], MOVE_TYPE_DRIVE, Drivers[driverid][nSpeed], .UseMapAndreas = false, .radius = 0.0, .setangle = false, .dist_offset = 0.0, .stopdelay = 0);
-
+		FCNPC_GoTo(npcid, DriverPath[driverid][cnode][0], DriverPath[driverid][cnode][1], DriverPath[driverid][cnode][2], MOVE_TYPE_DRIVE, Drivers[driverid][nSpeed], .UseMapAndreas = false, .radius = 0.0, .setangle = true, .dist_offset = 0.0, .stopdelay = 0);
         FCNPC_SetQuaternion(npcid, Qw, Qx, Qy, Qz);
 
 	    #if DEBUG_BUBBLE == true
 		new str[65];
-		format(str, sizeof(str), "{888888}[%d]\nX:%d Y:%d B:%b C:%b\n %d {666666}Speed: %.02f ", driverid, Drivers[driverid][nZoneX], Drivers[driverid][nZoneY], blocked, complex, cnode, Drivers[driverid][nSpeed]);
+		format(str, sizeof(str), "{888888}[%d]\nX:%d Y:%d B:%b C:%b\n %d {666666}Speed: %.02f\nangle: %f", driverid, Drivers[driverid][nZoneX], Drivers[driverid][nZoneY], blocked, complex, cnode, Drivers[driverid][nSpeed], z_angle);
 		SetPlayerChatBubble(npcid, str, -1, 10.0, 5000);
 		#endif
 
@@ -1901,7 +1901,6 @@ public FCNPC_OnReachDestination(npcid)
 
 // ----------------------------------------------------------------------------- Some random functions.
 
-forward Float:smooth_path(Float:path[][2], len = sizeof path);
 Float:smooth_path(Float:path[][2], len = sizeof path) // Basic Smoothing algorithm I (NaS) converted from Python - All nodes orientate at 2 coords in a relation (defined by weight_data & weight_smooth), the original data and the smooth path
 {
 	new Float:npath[MAX_PATH_LEN][2];
@@ -1926,7 +1925,6 @@ Float:smooth_path(Float:path[][2], len = sizeof path) // Basic Smoothing algorit
 	return npath;
 }
 
-forward Float:OffsetPath(Float:path[MAX_PATH_LEN][2], len, Float:d);
 Float:OffsetPath(Float:path[MAX_PATH_LEN][2], len, Float:d) // Another classy algorithm for offsetting a 2D path - d = distance, negative = right
 {
 	new Float:H[MAX_PATH_LEN][2], Float:U[MAX_PATH_LEN][2];
@@ -1992,13 +1990,11 @@ GetPathNode()
 	return PathNodes[random(PathNodesNum)];
 }
 
-forward Float:Get2DAngleOf3Points(Float:x1, Float:y1, Float:x2, Float:y2, Float:x3, Float:y3);
 Float:Get2DAngleOf3Points(Float:x1, Float:y1, Float:x2, Float:y2, Float:x3, Float:y3)
 {
 	return floatangledistdir(-atan2(x2-x1, y2-y1), -atan2(x3-x2, y3-y2));
 }
 
-forward Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist);
 Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist)
 {
 	if(CA_RayCastLine(X, Y, Z, X, Y, Z + dist, X, Y, Z)) return Z;
@@ -2012,8 +2008,7 @@ floatangledist(Float:alpha, Float:beta) // Ranging from 0 to 180, not directiona
     return distance;
 }
 
-forward Float:floatangledistdir(Float:firstAngle, Float:secondAngle); // Ranging from -180 to 180 (directional)
-Float:floatangledistdir(Float:firstAngle, Float:secondAngle)
+Float:floatangledistdir(Float:firstAngle, Float:secondAngle) // Ranging from -180 to 180 (directional)
 {
 	new Float:difference = secondAngle - firstAngle;
 	while(difference < -180.0) difference += 360.0;
@@ -2056,6 +2051,53 @@ public OnPlayerTakeDamage(playerid, issuerid, Float: amount, weaponid, bodypart)
 
 public OnPlayerGiveDamage(playerid, damagedid, Float: amount, weaponid, bodypart)
 {
+	return 1;
+}
+
+stock GetRotForSurface(&Float:qw, &Float:qx, &Float:qy, &Float:qz, Float:surface_rx, Float:surface_ry, Float:offset_rx = 0.0, Float:offset_ry = 0.0, Float:offset_rz = 0.0) // By NaS
+{
+	const eulermode:rot_mode = euler_zxy;
+
+	new Float:matrix[4][4];
+
+	GetRotationMatrixFromEuler(matrix, offset_rx, offset_ry, offset_rz, rot_mode);
+
+	if(surface_rx != 0.0 || surface_ry != 0.0) RotateMatrixWithEuler(matrix, surface_rx, surface_ry, 0.0, rot_mode);
+
+	new Float:euler_rx, Float:euler_ry, Float:euler_rz;
+
+	GetEulerFromMatrix(matrix, euler_rx, euler_ry, euler_rz);
+	GetQuatFromEuler(euler_rx, euler_ry, euler_rz, qw, qx, qy, qz, rot_mode);
+
+	return 1;
+}
+
+stock GetRZFromVectorXY(Float:vx, Float:vy, &Float:a)
+{
+	if(vx == 0.0 && vy == 0.0) return 0;
+
+	new Float:len = VectorSize(vx, vy, 0.0);
+
+	vx = vx / len;
+	vy = vy / len;
+
+	a = atan2(vy, vx) - 90.0;
+
+	return 1;
+}
+
+stock GetRXFromVectorZ(Float:vz, &Float:rx)
+{
+	rx = -(acos(vz) - 90.0);
+
+	return 1;
+}
+
+stock NormalizeEuler(&Float:rot)
+{
+	while(rot < 0.0) rot += 360.0;
+	while(rot >= 360.0) rot -= 360.0;
+
 	return 1;
 }
 
