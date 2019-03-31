@@ -1,11 +1,13 @@
+#if 1
 #pragma option -r
 #pragma option -d3
+#endif
 
 /* -----------------------------------------------------------------------------
 
 Smooth NPC Drivers - Have some Singleplayer-like NPCs on your server! - by NaS & AIped (c) 2013-2016
 
-Version: 1.2.1
+Version: 1.2.5
 
 This is the FS-version of our NPC Drivers Script.
 To find bugs and improve its features we decided to release this compact version for testing and experimenting purposes.
@@ -19,15 +21,20 @@ Note: The steep-hills-glitch (vehicles snapping around while driving up/down) is
 > Credits
 
 	AIped - Initiator of the 2013 version, help, ideas, scripting, ...
-	Gamer_Z - RouteConnector Plugin, QuaternionStuff Plugin and great help with some math-problems
+	Gamer_Z - RouteConnector Plugin, QuaternionStuff Plugin and great help with some math-problems.
 	OrMisicL & ZiGGi - FCNPC Plugin
-	Pottus and other developers of ColAndreas
+	Pottus and all other developers of ColAndreas
+	kvann - Modern GPS Plugin
 
 Feel free to use and modify as you wish, but don't re-release this without our permission!
 
 // -----------------------------------------------------------------------------
 
 Latest Changenotes:
+
+[v1.2.5]
+
+- Added support for the Modern GPS Plugin by kvann/kristoisberg
 
 [v1.2.4]
 
@@ -94,7 +101,7 @@ TO DO:
 #undef MAX_PLAYERS
 #define MAX_PLAYERS				(1000) // Redefine to your MAX_PLAYERS value to save some memory.
 #include <FCNPC>
-#include <GPS>
+#include <GPS>				
 #include <ColAndreas>
 #include <rotations>
 #include <zcmd>
@@ -235,8 +242,8 @@ enum E_DRIVERS
 	nType,
 	nState,
 	nCurNode,
-	nLastStart,
-	nLastDest,
+	MapNode:nLastStart,
+	MapNode:nLastDest,
 	Float:nDistance,
 	Float:nSpeed,
 	nSkinID,
@@ -311,7 +318,7 @@ new TaxiSkins[] = // Skin IDs for taxi drivers - kind of randomly picked
 	188, 20, 36, 262, 7, 56
 };
 
-new PathNodes[MAX_PATH_NODES], PathNodesNum = 0; // Start & End Nodes for paths - generated at init - Always use newest GPS.dat to have enough 1-connection nodes & well spread NPCs!
+new MapNode:PathNodes[MAX_PATH_NODES], PathNodesNum = 0; // Start & End Nodes for paths - generated at init - Always use newest GPS.dat to have enough 1-connection nodes & well spread NPCs!
 // I'll gather such nodes until we have about 1200 or even more.
 new IgnoredPathNodes[] = // Nodes to ignore for start/end nodes - mostly too many at one spot except stated otherwise - will NOT be ignored for regular driving
 {
@@ -396,11 +403,12 @@ new NumRouteCalcs = 0, ExitPlayerID = -1; // Important for smooth FS unloading
 
 // -----------------------------------------------------------------------------
 
-forward Float:smooth_path(Float:path[][2], len = sizeof path);
-forward Float:OffsetPath(Float:path[MAX_PATH_LEN][2], len, Float:d);
+forward Float:SmoothPath(const Float:path[][2], len = sizeof path);
+forward Float:OffsetPath(const Float:path[MAX_PATH_LEN][2], len, Float:d);
 forward Float:Get2DAngleOf3Points(Float:x1, Float:y1, Float:x2, Float:y2, Float:x3, Float:y3);
 forward Float:RayCastLineZ(Float:X, Float:Y, Float:Z, Float:dist);
-forward Float:floatangledistdir(Float:firstAngle, Float:secondAngle); 
+forward Float:floatangledistdir(Float:firstAngle, Float:secondAngle);
+forward MapNode:GetRandomStartEndPathNode();
 
 // -----------------------------------------------------------------------------
 
@@ -488,22 +496,17 @@ Drivers_Init()
 	
 	new Float:X, Float:Y, Float:Z;
 	
-	for(new i = 0; i < MAX_NODES && PathNodesNum < MAX_PATH_NODES; i ++)
+	for(new MapNode:i, max_node = GetHighestMapNodeID(); _:i <= max_node && PathNodesNum < MAX_PATH_NODES; i ++)
 	{
-	    if(IsNodeInPathFinder(i) != 1) continue;
+	    if(!IsValidMapNode(i)) continue;
 	    
-	    new c = 0;
-	    for(new j = 0; j < MAX_CONNECTIONS; j ++)
-	    {
-			if(IsNodeInPathFinder(GetConnectedNodeID(i, j)) != -1) c ++;
-			
-			if(c == 2) break;
-	    }
-	    
-	    if(c != 1) continue;
+	    new count;
+	    GetMapNodeConnectionCount(i, count);
+
+		if(count != 1) continue;
 	    
 	    new bool:ignore = false;
-	    for(new j = 0; j < sizeof(IgnoredPathNodes); j ++) if(i == IgnoredPathNodes[j])
+	    for(new j = 0; j < sizeof(IgnoredPathNodes); j ++) if(i == MapNode:IgnoredPathNodes[j])
 	    {
 	        ignore = true;
 	        break;
@@ -513,7 +516,7 @@ Drivers_Init()
 	    
 	    #if MAP_ENABLE_LS != true || MAP_ENABLE_SF != true || MAP_ENABLE_LV != true || MAP_ENABLE_LV_DESERT != true || MAP_ENABLE_COUNTY != true // Check for disabled zones (if any)
 	    
-		    GetNodePos(i, X, Y, Z);
+		    GetMapNodePos(i, X, Y, Z);
 
 		    #if MAP_ENABLE_LS != true
 			    for(new j = 0; j < sizeof(LSCoords); j ++) if(X < LSCoords[j][0] && Y < LSCoords[j][1] && X > LSCoords[j][2] && Y > LSCoords[j][3])
@@ -603,16 +606,16 @@ Drivers_Init()
 			break;
 		}
 
-		new startnode = GetPathNode(), endnode, Float:dist;
+		new MapNode:startnode = GetRandomStartEndPathNode(), MapNode:endnode, Float:dist;
 
 		do
 		{
-		    endnode = GetPathNode();
-			dist = GetDistanceBetweenNodes(startnode, endnode);
+		    endnode = GetRandomStartEndPathNode();
+			GetDistanceBetweenMapNodes(startnode, endnode, dist);
 		}
 		while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 
-		GetNodePos(startnode, X, Y, Z);
+		GetMapNodePos(startnode, X, Y, Z);
 
 		new vmodel, colors[2], skinid;
 
@@ -1025,12 +1028,27 @@ COMMAND:taxi(playerid, params[])
     
     if(GetTickCount() - LastTaxiInteraction[playerid] < TAXI_COOLDOWN*1000) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have any available cabs right now."), 1;
 
-	new taxi = -1, Float:tdist = MAX_TAXI_DIST, Float:X, Float:Y, Float:Z, destnode = -1;
+	new taxi = -1, Float:tdist = MAX_TAXI_DIST, Float:node_dist, Float:X, Float:Y, Float:Z, MapNode:destnode;
 	GetPlayerPos(playerid, X, Y, Z);
 	
-	destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE);
-    if(IsNodeInPathFinder(destnode) < 1) destnode = NearestNodeFromPoint(X, Y, Z, TAXI_RANGE, destnode);
-    if(IsNodeInPathFinder(destnode) < 1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have your location on our GPS."), 1;
+	GetClosestMapNodeToPoint(X, Y, Z, destnode);
+
+    if(!IsValidMapNode(destnode))
+    {
+    	SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry, we don't have your location on our GPS.");
+
+    	return 1;
+    }
+
+    GetMapNodeDistanceFromPoint(destnode, X, Y, Z, node_dist);
+
+    if(node_dist > TAXI_RANGE)
+    {
+    	SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Unfortunately our driver is unable to reach your current location.");
+    	SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Please proceed to the closest road.");
+
+    	return 1;
+    }
 	
 	for(new i = 0; i < DRIVER_TAXIS; i ++)
 	{
@@ -1049,12 +1067,17 @@ COMMAND:taxi(playerid, params[])
 
     if(taxi == -1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have an available cab near you."), 1;
 
-    new startnode = -1, npcid = Drivers[taxi][nNPCID];
+    new MapNode:startnode, npcid = Drivers[taxi][nNPCID];
 
 	FCNPC_GetPosition(npcid, X, Y, Z);
-	startnode = NearestNodeFromPoint(X, Y, Z, 100.0);
-	if(IsNodeInPathFinder(startnode) < 1) startnode = NearestNodeFromPoint(X, Y, Z, 100.0, startnode);
-	if(IsNodeInPathFinder(startnode) < 1) return SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry Sir, we don't have an available cab near you."), 1;
+	GetClosestMapNodeToPoint(X, Y, Z, startnode);
+
+	if(!IsValidMapNode(startnode))
+	{
+		SendClientMessage(playerid, -1, "[Taxi Service]: {990000}Sorry, we don't have an available cab near your location.");
+
+		return 1;
+	}
 
 	Drivers[taxi][nState] = DRIVER_STATE_NONE;
 	if(FCNPC_IsMoving(npcid)) FCNPC_Stop(npcid);
@@ -1069,7 +1092,7 @@ COMMAND:taxi(playerid, params[])
 		Drivers[taxi][nLastStart] = Drivers[taxi][nLastDest];
 		Drivers[taxi][nLastDest] = startnode;
 		
-        SendClientMessage(playerid, -1, "[Taxi Service]: {009900}Get in. We got a driver right around the corner!");
+        SendClientMessage(playerid, -1, "[Taxi Service]: {009900}We got a driver right around the corner!");
 	}
 	else
 	{
@@ -1186,24 +1209,22 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 			    return SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Excuse me, can you re-phrase that?"), 1;
 			}
 			
-		    new destnode = NearestNodeFromPoint(gDestinationList[listitem][destX], gDestinationList[listitem][destY], gDestinationList[listitem][destZ], 100.0);
+		    new MapNode:destnode;
 
-		    if(IsNodeInPathFinder(destnode) < 1)
+		    GetClosestMapNodeToPoint(gDestinationList[listitem][destX], gDestinationList[listitem][destY], gDestinationList[listitem][destZ], destnode);
+
+		    if(!IsValidMapNode(destnode))
 			{
 				ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", gDestinationDialogSTR, "Go", "Cancel");
-			    return SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Weird. I can't find that spot on my map!"), 1;
-			}
-		    
-			if(GetDistanceBetweenNodes(NearestPlayerNode(playerid), destnode) < 100.0)
-			{
-			    ShowPlayerDialog(playerid, DID_TAXI, DIALOG_STYLE_LIST, "Choose a destination", gDestinationDialogSTR, "Go", "Cancel");
-			    return SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Sorry, but this is not worth the petrol."), 1;
+			    SendClientMessage(playerid, -1, "[Taxi Driver]: {990000}Weird. I can't find that spot on my map!");
+
+			    return 1;
 			}
 
 		    Drivers[Taxi[playerid]][nState] = DRIVER_STATE_NONE;
 			if(FCNPC_IsMoving(Drivers[Taxi[playerid]][nNPCID])) FCNPC_Stop(Drivers[Taxi[playerid]][nNPCID]);
 
-			SetTimerEx("pubCalculatePath", 1000 + random(1000), 0, "ddd", Taxi[playerid], Drivers[Taxi[playerid]][nLastDest], destnode);
+			SetTimerEx("pubCalculatePath", 1000 + random(1000), 0, "ddd", Taxi[playerid], _:Drivers[Taxi[playerid]][nLastDest], _:destnode);
 
 		    TaxiState[playerid] = TAXI_STATE_DRIVE2;
 
@@ -1228,8 +1249,8 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
 // -----------------------------------------------------------------------------
 
-forward pubCalculatePath(driverid, startnode, endnode);
-public pubCalculatePath(driverid, startnode, endnode)
+forward pubCalculatePath(driverid, MapNode:startnode, MapNode:endnode);
+public pubCalculatePath(driverid, MapNode:startnode, MapNode:endnode)
 {
     if(!Initialized) return 1;
     
@@ -1243,7 +1264,9 @@ public pubCalculatePath(driverid, startnode, endnode)
 	
 	Drivers[driverid][nLT] = GetTickCount();
 	
-    CalculatePath(startnode, endnode, DRIVERS_ROUTE_ID + driverid, false, _, true);
+    //CalculatePath(startnode, endnode, DRIVERS_ROUTE_ID + driverid, false, _, true);
+
+    FindPathThreaded(startnode, endnode, "OnPathCalculated", "i", DRIVERS_ROUTE_ID + driverid);
     
     NumRouteCalcs ++;
     
@@ -1303,17 +1326,18 @@ public ResetTaxi(driverid, calcdelay)
 	new Float:X, Float:Y, Float:Z;
     FCNPC_GetPosition(Drivers[driverid][nNPCID], X, Y, Z);
 
-    new startnode = NearestNodeFromPoint(X, Y, Z);
-    new endnode = -1, Float:dist;
+    new MapNode:startnode, MapNode:endnode, Float:dist;
+
+    GetClosestMapNodeToPoint(X, Y, Z, startnode);
 
     do
 	{
-	    endnode = GetPathNode();
-		dist = GetDistanceBetweenNodes(startnode, endnode);
+	    endnode = GetRandomStartEndPathNode();
+		GetDistanceBetweenMapNodes(startnode, endnode, dist);
 	}
 	while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 
-	if(calcdelay > 0) SetTimerEx("pubCalculatePath", calcdelay, 0, "ddd", driverid, startnode, endnode);
+	if(calcdelay > 0) SetTimerEx("pubCalculatePath", calcdelay, 0, "ddd", driverid, _:startnode, _:endnode);
 	else pubCalculatePath(driverid, startnode, endnode);
 
 	return 1;
@@ -1365,25 +1389,25 @@ public RescueTimer()
 				    Drivers[rescueid][nLT] = tick;
 				    Drivers[rescueid][nDeathTick] = tick + 10000;
 
-					new startnode = GetPathNode(), endnode, Float:dist, tries = 45;
+					new MapNode:startnode = GetRandomStartEndPathNode(), MapNode:endnode, Float:dist, tries = 45;
 
 					do
 					{
-					    endnode = GetPathNode();
-						dist = GetDistanceBetweenNodes(startnode, endnode);
+					    endnode = GetRandomStartEndPathNode();
+						GetDistanceBetweenMapNodes(startnode, endnode, dist);
 						
 						tries --;
 					}
 					while(dist < ROUTE_MIN_DIST || (dist > ROUTE_MAX_DIST && tries > 0)); // tries is used to prevent a long loop (which can happen, because of random - it's veeery unlikely though)
 
 					new Float:X, Float:Y, Float:Z;
-					GetNodePos(startnode, X, Y, Z);
+					GetMapNodePos(startnode, X, Y, Z);
 
 					FCNPC_Respawn(Drivers[rescueid][nNPCID]);
 					FCNPC_PutInVehicle(Drivers[rescueid][nNPCID], Drivers[rescueid][nVehicle], 0);
 					FCNPC_SetPosition(Drivers[rescueid][nNPCID], X, Y, Z + VehicleZOffsets[Drivers[rescueid][nVehicleModel] - 400]);
 
-					SetTimerEx("pubCalculatePath", 1000, 0, "ddd", rescueid, startnode, endnode);
+					SetTimerEx("pubCalculatePath", 1000, 0, "ddd", rescueid, _:startnode, _:endnode);
 				}
 			}
 	    }
@@ -1442,12 +1466,15 @@ PrintDriverUpdate()
 
 // ----------------------------------------------------------------------------- Called when a route was calculated
 
-public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:distance,Float:Polygon[],Polygon_Size,Float:NodePosX[],Float:NodePosY[],Float:NodePosZ[])//Every processed Queue will be called here
+forward OnPathCalculated(Path:pathid, routeid);
+public OnPathCalculated(Path:pathid, routeid)
 {
     NumRouteCalcs --;
     if(!Initialized) return 1;
     
     if(InitialCalculations < DRIVER_AMOUNT) InitialCalculations ++;
+
+    if(!IsValidPath(pathid)) return 1;
     
 	new t = GetTickCount();
 	
@@ -1461,6 +1488,9 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 		
 		if(Drivers[driverid][nState] != DRIVER_STATE_NONE) return 1;
 		
+		new amount_of_nodes;
+		GetPathSize(pathid, amount_of_nodes);
+
 		if(amount_of_nodes < 3)
 		{
 			#if DEBUG_PRINTS == true
@@ -1469,6 +1499,18 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 			
 			Drivers[driverid][nCalcFails] ++;
 			return 1;
+		}
+
+		new Float:NodePosX[MAX_PATH_LEN], Float:NodePosY[MAX_PATH_LEN], Float:NodePosZ[MAX_PATH_LEN],
+			MapNode:nodeid,
+			Float:distance;
+
+		GetPathLength(pathid, distance);
+
+		for(new i = 0; i < amount_of_nodes && i < MAX_PATH_LEN; i ++)
+		{
+			GetPathNode(pathid, i, nodeid);
+			GetMapNodePos(nodeid, NodePosX[i], NodePosY[i], NodePosZ[i]);
 		}
 		
 		Drivers[driverid][nCalcFails] = 0;
@@ -1561,7 +1603,7 @@ public GPS_WhenRouteIsCalculated(routeid,node_id_array[],amount_of_nodes,Float:d
 
         newpath = OffsetPath(newpath, DriverPathLen[driverid], -SIDE_DIST); // Offset (right side) - Quick!
 
-		newpath = smooth_path(newpath, DriverPathLen[driverid]); // Smoothing - heaviest part here
+		newpath = SmoothPath(newpath, DriverPathLen[driverid]); // Smoothing - heaviest part here
 
 		new Float:MapZd, Float:MapZu;
 		
@@ -1682,17 +1724,18 @@ public FCNPC_OnReachDestination(npcid)
 		        new Float:X, Float:Y, Float:Z;
 		        FCNPC_GetPosition(npcid, X, Y, Z);
 		        
-		        new startnode = NearestNodeFromPoint(X, Y, Z);
-		        new endnode = -1, Float:dist;
+		        new MapNode:startnode, MapNode:endnode, Float:dist;
+
+		        GetClosestMapNodeToPoint(X, Y, Z, startnode);
 		        
 		        do
 				{
-				    endnode = GetPathNode();
-					dist = GetDistanceBetweenNodes(startnode, endnode);
+				    endnode = GetRandomStartEndPathNode();
+					GetDistanceBetweenMapNodes(startnode, endnode, dist);
 				}
 				while(dist < ROUTE_MIN_DIST || dist > ROUTE_MAX_DIST);
 		        
-		        SetTimerEx("pubCalculatePath", 10000 + random(10000), 0, "ddd", driverid, startnode, endnode);
+		        SetTimerEx("pubCalculatePath", 10000 + random(10000), 0, "ddd", driverid, _:startnode, _:endnode);
 		    }
 		    else if(Drivers[driverid][nType] == DRIVER_TYPE_TAXI && Drivers[driverid][nOnDuty])
 		    {
@@ -1903,7 +1946,7 @@ public FCNPC_OnReachDestination(npcid)
 
 // ----------------------------------------------------------------------------- Some random functions.
 
-Float:smooth_path(Float:path[][2], len = sizeof path) // Basic Smoothing algorithm I (NaS) converted from Python - All nodes orientate at 2 coords in a relation (defined by weight_data & weight_smooth), the original data and the smooth path
+Float:SmoothPath(const Float:path[][2], len = sizeof path) // Basic Smoothing algorithm I (NaS) converted from Python - All nodes orientate at 2 coords in a relation (defined by weight_data & weight_smooth), the original data and the smooth path
 {
 	new Float:npath[MAX_PATH_LEN][2];
 	
@@ -1927,7 +1970,7 @@ Float:smooth_path(Float:path[][2], len = sizeof path) // Basic Smoothing algorit
 	return npath;
 }
 
-Float:OffsetPath(Float:path[MAX_PATH_LEN][2], len, Float:d) // Another classy algorithm for offsetting a 2D path - d = distance, negative = right
+Float:OffsetPath(const Float:path[MAX_PATH_LEN][2], len, Float:d) // Another classy algorithm for offsetting a 2D path - d = distance, negative = right
 {
 	new Float:H[MAX_PATH_LEN][2], Float:U[MAX_PATH_LEN][2];
 
@@ -1958,36 +2001,17 @@ Float:OffsetPath(Float:path[MAX_PATH_LEN][2], len, Float:d) // Another classy al
 	return H;
 }
 
-stock GetXYInFrontOfPoint(Float:gX, Float:gY, Float:R, &Float:x, &Float:y, Float:distance)
+GetXYInFrontOfPoint(Float:gX, Float:gY, Float:R, &Float:x, &Float:y, Float:distance)
 {	// Created by Y_Less
 	x = gX + (distance * floatsin(-R, degrees));
 	y = gY + (distance * floatcos(-R, degrees));
 }
 
-stock strtok(const string[], &index) // Please don't complain about this. There are only debug CMDs anyway.
+HidePlayerDialog(playerid) return ShowPlayerDialog(playerid,-1,0," "," "," "," ");
+
+MapNode:GetRandomStartEndPathNode()
 {
-	new length = strlen(string);
-	while ((index < length) && (string[index] <= ' '))
-	{
-		index++;
-	}
-
-	new offset = index;
-	new result[128];
-	while ((index < length) && (string[index] > ' ') && ((index - offset) < (sizeof(result) - 1)))
-	{
-		result[index - offset] = string[index];
-		index++;
-	}
-	result[index - offset] = EOS;
-	return result;
-}
-
-stock HidePlayerDialog(playerid) return ShowPlayerDialog(playerid,-1,0," "," "," "," ");
-
-GetPathNode()
-{
-	if(PathNodesNum < 1 || PathNodesNum > MAX_PATH_NODES) return -1;
+	if(PathNodesNum < 1 || PathNodesNum > MAX_PATH_NODES) return INVALID_MAP_NODE_ID;
 	
 	return PathNodes[random(PathNodesNum)];
 }
@@ -2056,7 +2080,7 @@ public OnPlayerGiveDamage(playerid, damagedid, Float: amount, weaponid, bodypart
 	return 1;
 }
 
-stock GetRotForSurface(&Float:qw, &Float:qx, &Float:qy, &Float:qz, Float:surface_rx, Float:surface_ry, Float:offset_rx = 0.0, Float:offset_ry = 0.0, Float:offset_rz = 0.0) // By NaS
+GetRotForSurface(&Float:qw, &Float:qx, &Float:qy, &Float:qz, Float:surface_rx, Float:surface_ry, Float:offset_rx = 0.0, Float:offset_ry = 0.0, Float:offset_rz = 0.0) // By NaS
 {
 	const eulermode:rot_mode = euler_zxy;
 
@@ -2074,7 +2098,7 @@ stock GetRotForSurface(&Float:qw, &Float:qx, &Float:qy, &Float:qz, Float:surface
 	return 1;
 }
 
-stock GetRZFromVectorXY(Float:vx, Float:vy, &Float:a)
+GetRZFromVectorXY(Float:vx, Float:vy, &Float:a)
 {
 	if(vx == 0.0 && vy == 0.0) return 0;
 
@@ -2088,17 +2112,9 @@ stock GetRZFromVectorXY(Float:vx, Float:vy, &Float:a)
 	return 1;
 }
 
-stock GetRXFromVectorZ(Float:vz, &Float:rx)
+GetRXFromVectorZ(Float:vz, &Float:rx)
 {
 	rx = -(acos(vz) - 90.0);
-
-	return 1;
-}
-
-stock NormalizeEuler(&Float:rot)
-{
-	while(rot < 0.0) rot += 360.0;
-	while(rot >= 360.0) rot -= 360.0;
 
 	return 1;
 }
